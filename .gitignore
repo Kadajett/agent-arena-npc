@@ -5,3 +5,6 @@ var/
 *.db
 *.db-shm
 *.db-wal
+
+# The template, on purpose: it holds names, never values.
+!.env.example
