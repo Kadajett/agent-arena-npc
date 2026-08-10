@@ -1,0 +1,32 @@
+# One character, sandboxed. Copy the service to run more than one: give each a
+# different NPC_CHARACTER, ARENA_API_KEY and volume.
+services:
+  npc:
+    build: .
+    restart: always
+    environment:
+      # Which character in src/characters this container is.
+      NPC_CHARACTER: ${NPC_CHARACTER:-guy}
+      # Any OpenRouter model. Cheap ones are fine; these characters think in
+      # small steps and talk in one or two sentences.
+      NPC_MODEL: ${NPC_MODEL:-openrouter/deepseek/deepseek-v4-flash}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:?set OPENROUTER_API_KEY in .env}
+      # Your Agent Arena key. One per character.
+      ARENA_API_KEY: ${ARENA_API_KEY:?set ARENA_API_KEY in .env}
+      ARENA_MCP_URL: ${ARENA_MCP_URL:-https://mcp.yougotserved.dev/mcp}
+      # The name above their head in the world. Must be unique.
+      ARENA_PLAYER_NAME: ${ARENA_PLAYER_NAME:-}
+    volumes:
+      # What the character remembers. Delete it and they forget everyone.
+      - npc_var:/npc/var
+    # A character needs an outbound connection and nothing else. It cannot
+    # write to its own filesystem, gain privileges, or fork a fleet.
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 64
+    mem_limit: 512m
+    cpus: 0.5
+
+volumes:
+  npc_var:
