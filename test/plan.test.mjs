@@ -28,12 +28,18 @@ function fakeMemory(initial = null) {
   };
 }
 
+/**
+ * `asked` collects the brief, not the prompt argument. The brief now travels
+ * as per-call instructions so it is sent and not written into the character's
+ * message history; only a stub line goes in as the message. See the generate()
+ * call in Plan.replan().
+ */
 function fakeAgent(replies) {
   const asked = [];
   return {
     asked,
-    async generate(prompt) {
-      asked.push(prompt);
+    async generate(prompt, options = {}) {
+      asked.push(String(options.instructions ?? prompt));
       return { text: replies.shift() ?? '{}' };
     }
   };
@@ -292,6 +298,19 @@ test('an item is crossed off by its number, the way it was shown', async () => {
   assert.match(brief, /cup back - done/);
 });
 
+test('a favour taken on from somebody by name says so in the brief', async () => {
+  const memory = fakeMemory();
+  const plan = planFor(fakeAgent([]), memory);
+  await plan.load();
+  await plan.take('find the key');
+  await plan.take('bring Miles a tree branch for a coin', 'Miles');
+
+  const brief = plan.describe();
+  assert.match(brief, /1\. find the key/);
+  assert.doesNotMatch(brief, /1\. find the key \(for/, 'a self-set chore names nobody');
+  assert.match(brief, /2\. bring Miles a tree branch for a coin \(for Miles\)/);
+});
+
 test('a note is gone an hour later, without anything having to run', async () => {
   const memory = fakeMemory();
   const plan = planFor(fakeAgent([]), memory);
@@ -322,4 +341,45 @@ test('the plan does not overwrite what the rest of memory wrote', async () => {
   const stored = WorkingMemorySchema.parse(memory.read());
   assert.equal(stored.places.length, 1, 'the room it found is still there');
   assert.equal(stored.plan.length, 1, 'and so is the plan');
+});
+
+test('a step worked at forever is eventually given up on', async () => {
+  const memory = fakeMemory();
+  const agent = fakeAgent([
+    '{"steps": ["find the Grey Hall the Wanderer mentioned"]}',
+    '{"steps": ["ask somebody who has actually been there"]}'
+  ]);
+  const plan = planFor(agent, memory);
+  await plan.load();
+  await plan.refresh('');
+  assert.match(plan.current().what, /Grey Hall/);
+
+  // Guy walking to the north path and back all evening, reporting progress
+  // every time, because a model chasing a building that does not exist never
+  // says "blocked" - it says "still at it".
+  for (let go = 0; go < 6; go++) {
+    await plan.record('walk', 'walked to the north path', 'same');
+  }
+  assert.equal(plan.current(), null, 'the step is not still the one being worked on');
+
+  assert.equal(await plan.refresh('You are at town.'), true, 'and a new plan is made');
+  assert.equal(plan.current().what, 'ask somebody who has actually been there');
+  // What went nowhere is named, so it is not planned straight back in.
+  assert.match(agent.asked[1], /Grey Hall/);
+  assert.match(agent.asked[1], /do not plan these again/);
+});
+
+test('a step that is going somewhere is not cut short', async () => {
+  const memory = fakeMemory();
+  const plan = planFor(fakeAgent(['{"steps": ["ask Barnaby", "count your money"]}']), memory);
+  await plan.load();
+  await plan.refresh('');
+  for (let go = 0; go < 5; go++) {
+    await plan.record('say', 'he grunted', 'same');
+  }
+  assert.equal(plan.current().what, 'ask Barnaby', 'five goes is still trying');
+  await plan.record('say', 'he told me', 'done');
+  assert.equal(plan.current().what, 'count your money');
+  // And the count resets, so the next step gets its own full run at it.
+  assert.equal(plan.current().tries, 0);
 });

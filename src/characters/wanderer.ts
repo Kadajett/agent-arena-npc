@@ -16,10 +16,12 @@ import { loadPersona } from '../persona.js';
 export const wanderer: CharacterSheet = {
   id: 'wanderer',
   playerName: process.env.ARENA_PLAYER_NAME ?? 'Wanderer',
+  // See guy.ts. Sorcerer here because sorcerer there.
+  classPath: 'sorcerer',
   homeScene: TOWN,
   persona: loadPersona('wanderer'),
-  model: process.env.NPC_MODEL ?? 'openrouter/deepseek/deepseek-v4-flash',
-  capabilities: ['speak', 'walk', 'doors', 'purpose'],
+  model: process.env.NPC_MODEL ?? 'openrouter/openai/gpt-oss-120b',
+  capabilities: ['speak', 'talk_to_folk', 'walk', 'doors', 'fight', 'purpose'],
   behavior: (agent: Agent) => new Autonomous(agent),
   goal: {
     aim: 'you have decided the town needs proper names for its places, and that '
@@ -29,6 +31,6 @@ export const wanderer: CharacterSheet = {
   },
   // He has an opinion about everything and time to share it.
   wordiness: 55,
-  pace: { idle: 10, engaged: 4 },
+  pace: { idle: 90, engaged: 9 },
   remembers: true
 };

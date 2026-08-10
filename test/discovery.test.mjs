@@ -38,7 +38,8 @@ test('what you were told is kept apart from what you saw', () => {
   });
   assert.equal(unconfirmed(state).length, 1);
   assert.match(describePlacesKnown(state), /only been told about/);
-  assert.match(describePlacesKnown(state), /Guy said so/);
+  // Who said it, and that it is still only hearsay, in the same breath.
+  assert.match(describePlacesKnown(state), /Guy says so - you have not seen it/);
 });
 
 test('going yourself settles it', () => {
@@ -99,7 +100,8 @@ test('doors are described by where they go', () => {
     plainSceneName
   );
   assert.match(described, /Barnaby's inn/);
-  assert.match(described, /forest.*locked/);
+  // The forest door now reads by its plain name rather than its scene id.
+  assert.match(described, /the woods.*locked/);
 });
 
 test('nothing to see means nothing claimed', () => {

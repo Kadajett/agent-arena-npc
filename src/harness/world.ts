@@ -64,13 +64,56 @@ export function isHomeTurf(scene: string): boolean {
   return scene in PLACES;
 }
 
+/**
+ * The real places in rooms a character knows by heart but is not standing in.
+ *
+ * Everyone can see the room they are in. An innkeeper who has stood behind the
+ * same bar for years also knows his own street, and being able to say "the east
+ * gate is that way" is the difference between a local and a stranger. Without
+ * it he has nothing true to offer when somebody asks for directions, and a
+ * model with nothing true to offer invents a guildhall.
+ *
+ * Only ever the coordinates already checked against the map, and only for the
+ * characters given it on their sheet. This is not the gazetteer this file used
+ * to be: it is one person knowing their own town.
+ */
+export function describeLocalKnowledge(scenes: string[], standingIn: string): string {
+  const lines: string[] = [];
+  for (const scene of scenes) {
+    if (scene === standingIn) {
+      continue;
+    }
+    const places = placesIn(scene);
+    const names = Object.keys(places);
+    if (names.length === 0) {
+      continue;
+    }
+    lines.push(`In ${plainSceneName(scene)}, which you know your way around:`);
+    lines.push(...names.map((name) => `  ${name} - ${places[name].description}`));
+  }
+  if (lines.length === 0) {
+    return '';
+  }
+  lines.push('These are the places you can actually send somebody to. There are no others you know of.');
+  return lines.join('\n');
+}
+
 export function describePlaces(scene: string): string {
   const places = placesIn(scene);
   const names = Object.keys(places);
   if (names.length === 0) {
     return '';
   }
-  return names.map((name) => `- "${name}": ${places[name].description}`).join('\n');
+  // Coordinates ride along because an agentic character moves itself with
+  // arena_move_to(x, y): a place it can name but not locate is a place it can
+  // only talk about. The old harness resolved names to coordinates on the
+  // model's behalf; now the map itself has to say where things are.
+  return names
+    .map(
+      (name) =>
+        `- "${name}" (x ${places[name].x}, y ${places[name].y}): ${places[name].description}`
+    )
+    .join('\n');
 }
 
 /** Which room a named place is in, of the rooms a character knows by heart. */
@@ -84,11 +127,108 @@ export function roomOf(place: string): string | null {
   return null;
 }
 
-/** A room's name as a person would say it, not as the database spells it. */
+/**
+ * A room's name as a person would say it, not as the database spells it.
+ *
+ * This is the sign over the door, and it is the one bit of the world every
+ * character is allowed to read without going in: the gateway reports where a
+ * doorway leads, so a character standing in the street can tell the inn from
+ * the house next to it the same way anybody could. Without distinct names both
+ * doors read as "somewhere else", the character picks whichever, and you get
+ * Guy announcing he is off to the house on the east side and walking straight
+ * back into the inn.
+ *
+ * Naming a door is not knowing what is behind it. "Upstairs at the inn" tells
+ * a character the stairs exist, which they can see; it does not tell them what
+ * is up there, which is the thing worth going to find out.
+ */
+export const SCENE_NAMES: Record<string, string> = {
+  [TOWN]: 'town',
+  [INN]: "Barnaby's inn",
+  'reldens-house-1-2d-floor': 'upstairs at the inn',
+  'reldens-house-2': 'the house on the east side',
+  'reldens-forest': 'the woods',
+  // Every remaining room, because the fallback below is not a name, it is a
+  // database key with its punctuation filed off. Guy was heard talking about
+  // "bots", and nothing had leaked into his memory: reldens-bots is a real room
+  // and the fallback handed him "bots" as the name of a place, so he did what
+  // anybody would and said it out loud. The others were no better waiting to
+  // happen - "gravity", "arena crypt", and a room that came out as "bots forest
+  // house 01 n0", which no person has ever said.
+  //
+  // The demo rooms get names that fit what is actually in them: the two full of
+  // walking trees are woodland, and the hut is the one building in it.
+  'reldens-bots': 'the clearing',
+  'reldens-bots-forest': 'the deep wood',
+  'reldens-bots-forest-house-01-n0': "the woodcutter's hut",
+  'reldens-gravity': 'the sunken chamber',
+  // The arena regions. "Arena" is our word for them, not theirs.
+  'arena-grassland': 'the grasslands',
+  'arena-crypt': 'the crypt',
+  'arena-depths': 'the depths',
+  'arena-shore': 'the shore',
+  'arena-volcano': 'the volcano',
+  // Named for what the person down there is doing, which is counting them.
+  'arena-dungeon': 'the cells'
+};
+
 export function plainSceneName(scene: string): string {
-  const known: Record<string, string> = {
-    [TOWN]: 'town',
-    [INN]: "Barnaby's inn"
-  };
-  return known[scene] ?? scene.replace(/^reldens-/, '').replace(/-/g, ' ');
+  return SCENE_NAMES[scene] ?? rawSceneName(scene);
+}
+
+/**
+ * What a scene's own key reads as, with none of the overrides above applied -
+ * "forest" for reldens-forest, never "the woods". plainSceneName() gives a
+ * door only the pretty name; a character's own memory of a room it has
+ * actually stood in is written in this raw form instead (see notePlace() in
+ * npc.ts, which also calls plainSceneName() - but a room *without* an entry
+ * above gets this same string back either way, since that is the fallback
+ * plainSceneName() falls back to). A pretty override, when one exists, masks
+ * this name completely, so a door has to be found both ways: see doorNames()
+ * in actions.ts, which asks for both and is the whole reason this exists as
+ * its own function rather than staying folded into plainSceneName().
+ */
+export function rawSceneName(scene: string): string {
+  // Both prefixes, not just the engine's. "arena" is our word for a group of
+  // rooms and no more a place than "reldens" is, so a region added tomorrow
+  // without an entry above should read as "somewhere new" rather than "arena
+  // somewhere new". The named rooms above are the fix for the world as it
+  // stands; this is the fix for the next one somebody adds, which is the one
+  // that would otherwise be found by hearing a character say it out loud.
+  return scene.replace(/^(reldens|arena)-/, '').replace(/-/g, ' ');
+}
+
+/**
+ * Every place in this world, by name, and nothing whatever about what is in it.
+ *
+ * This file opens by warning against exactly this, and the warning still holds:
+ * a gazetteer handed to everybody made every character omniscient, so nobody
+ * ever went to look at anything and nothing anybody said was worth hearing.
+ * What follows is narrower than that on purpose, and is given to one person.
+ *
+ * It is a list of names. Not where anything is, not what is through which door,
+ * not a single coordinate. That is the difference between a map and having
+ * heard of somewhere, and a man who has stood behind a bar for forty years
+ * listening to travellers has certainly heard of the volcano. He has never been
+ * up it and this tells him nothing about it.
+ *
+ * The reason he needs it is not so he can describe those places. It is so he
+ * can tell when somebody names one that does not exist. Guests have started
+ * asking after the Hinge Gate and the pantry door, and a man who cannot say
+ * "there is no such place" is no use as a record at all: he nods along, and
+ * the next person to ask gets told the innkeeper confirmed it.
+ */
+export function everywhereByName(): string[] {
+  return [...new Set(Object.values(SCENE_NAMES))].sort();
+}
+
+/** The scene whose in-world name this is, if any. The reverse of plainSceneName. */
+export function sceneNamed(name: string): string | null {
+  const wanted = String(name ?? '').trim().toLowerCase();
+  for (const [scene, pretty] of Object.entries(SCENE_NAMES)) {
+    if (pretty.toLowerCase() === wanted || rawSceneName(scene).toLowerCase() === wanted) {
+      return scene;
+    }
+  }
+  return null;
 }

@@ -15,6 +15,8 @@
 
 import { Agent } from '@mastra/core/agent';
 import { Intent, IntentSchema } from './actions.js';
+import { FEELING_GUIDANCE } from './feeling.js';
+import { meter } from './spend.js';
 
 /** Where this character's memory lives; passed on every model call. */
 export type MemoryScope = { resource: string; thread: string };
@@ -22,20 +24,33 @@ export type MemoryScope = { resource: string; thread: string };
 /**
  * How much the model may write back.
  *
- * A character answers with a small JSON object and at most a couple of hundred
- * words of speech, so a thousand tokens is roomy. Saying so matters because
- * providers reserve credit against the ceiling rather than the actual reply:
- * left at the default, every one of these ticks was quoted at 65,536 tokens
- * and refused outright once the balance dipped below what that would have cost.
+ * Saying so at all matters because providers reserve credit against the ceiling
+ * rather than the actual reply: left at the default, every one of these ticks
+ * was quoted at 65,536 tokens and refused outright once the balance dipped
+ * below what that would have cost.
+ *
+ * A thousand was the first guess, from the size of a reply: a small JSON object
+ * and a couple of hundred words of speech. That missed the largest thing a
+ * character writes, which is not its speech but its memory. Updating working
+ * memory means re-emitting the whole record - every person, every place, every
+ * note - as one tool call, and the Wanderer's ran past the ceiling and arrived
+ * as truncated JSON. The write was dropped, silently, and it would have kept
+ * being dropped as its memory grew. Four thousand fits a full record with room
+ * to spare, and still reserves against a fraction of what the default did.
  */
-export const REPLY_BUDGET = { maxOutputTokens: 1024 };
+export const REPLY_BUDGET = { maxOutputTokens: 4096 };
 
 export type Situation = {
   scene: string;
   /** Where the character is, in words. */
   where: string;
-  /** Everyone else in the room. */
-  others: string[];
+  /**
+   * Everyone else in the room, and whether this character has laid eyes on them
+   * before. The second half matters more than it looks: without it every tick
+   * reads as a first meeting, and three characters spent an evening telling
+   * each other about the two new faces at the bar. See noteFace() in memory.ts.
+   */
+  others: Array<{ name: string; known: boolean }>;
   /** Lines spoken since the last look, oldest first. */
   heard: Array<{ from: string; message: string }>;
   /** What this character can do right now, already written out. */
@@ -69,6 +84,13 @@ export type Situation = {
    * where it came in.
    */
   view: string;
+  /**
+   * What it is carrying, in one line, already written out. Empty when it is
+   * carrying nothing - which is said by saying nothing, because a line
+   * announcing empty pockets on every tick of an empty-handed character's life
+   * is the sort of noise that ends up being answered.
+   */
+  carrying: string;
   /** A subject it keeps circling back to, if it has one. */
   harping: string;
   /** Free-form character state, e.g. savings toward a goal. */
@@ -83,6 +105,8 @@ export interface Behavior {
   next(situation: Situation, memory: MemoryScope): Promise<Intent>;
   /** Called after an action runs, so a routine can advance. */
   completed?(intent: Intent, ok: boolean): void;
+  /** Whose voice to answer in, for behaviours that ask a model at all. */
+  answersAs?(persona: string): void;
 }
 
 /**
@@ -165,7 +189,28 @@ export class Routine implements Behavior {
 export class Autonomous implements Behavior {
   readonly kind = 'autonomous';
 
-  constructor(private readonly agent: Agent) {}
+  /**
+   * How many replies in a row have come back as prose with no action in them.
+   *
+   * A model follows the format its own history demonstrates far more closely
+   * than it follows an instruction it was given once, so a character that
+   * drifts out of answering in JSON does not drift back: every prose reply it
+   * writes is another example telling it that prose is how it answers. Guy
+   * went ninety-seven turns that way, narrating himself down a ladder into a
+   * room that does not exist while standing motionless outside the inn, and
+   * nothing in here ever told him otherwise. Salvaging the prose as speech is
+   * still right - it is usually real dialogue and binning it loses the turn -
+   * but on its own it makes the trapdoor comfortable, because from the
+   * character's side speaking worked. So the salvage stays and this counts.
+   */
+  private proseInARow = 0;
+
+  constructor(private readonly agent: Agent, private persona = '') {}
+
+  /** Told to the behaviour once the character is built, since it owns the text. */
+  answersAs(persona: string): void {
+    this.persona = persona;
+  }
 
   async next(situation: Situation, memory: MemoryScope): Promise<Intent> {
     const prompt = [
@@ -175,7 +220,7 @@ export class Autonomous implements Behavior {
       situation.actions,
       '',
       'Reply with JSON and nothing else:',
-      '{"action": "...", "place": "...", "message": "...", "progress": "same"}',
+      '{"action": "...", "place": "...", "message": "...", "progress": "same", "feeling": "..."}',
       'Use "place" only for walk. Use "message" for say, or when walking if you',
       'want to remark on it. Anything you say is in your own voice, with no',
       'asterisks and no description of your own actions.',
@@ -185,11 +230,85 @@ export class Autonomous implements Behavior {
           + '"blocked" if it cannot be done and you want a different plan.'
         : null,
       BOOKKEEPING,
+      FEELING_GUIDANCE,
       lengthGuidance(situation.wordiness)
     ]
       .filter((line): line is string => line !== null)
       .join('\n');
-    return askForIntent(this.agent, prompt, memory);
+    // The correction goes in the moment rather than the brief, and that is the
+    // whole point of it. The brief is per-call instructions, which is where the
+    // "reply with JSON and nothing else" line already lives and where Guy
+    // overrode it for ninety-seven turns running; another line in the same
+    // place is the thing that already does not work. The moment is the turn the
+    // character is answering, and it is the half that gets stored, so saying it
+    // there both puts it where the model is looking and leaves it in the
+    // history. That matters more than the immediacy: what made this stick was a
+    // history of nothing but prose, and a history with the correction in it no
+    // longer reads that way.
+    const correction = this.correction();
+    const moment = correction ? `${correction}\n${momentOf(situation)}` : momentOf(situation);
+    const intent = await askForIntent(this.agent, prompt, memory, moment, this.persona);
+    this.proseInARow = intent.salvagedFromProse ? this.proseInARow + 1 : 0;
+    return this.stillWorth(intent);
+  }
+
+  /**
+   * Whether a salvaged reply still gets spoken.
+   *
+   * The correction alone did not stop Guy, and the reason is that the harness
+   * was contradicting itself. It told him his last replies had no action in
+   * them and that nothing he described had happened, and then it took the prose
+   * and said it out loud anyway. From where he was standing the prose worked:
+   * he wrote a scene, the room heard the good bits, and a sentence went past
+   * claiming otherwise. Told one thing and shown another, he believed what he
+   * could see.
+   *
+   * So past a run, prose stops being spoken. The character stands there and
+   * says nothing, which makes the correction true rather than merely insistent,
+   * and puts a turn of silence in the history where a turn of accepted prose
+   * used to be.
+   *
+   * Deliberately later than the correction starts. Two is where a character is
+   * told; four is where it is no longer humoured. The gap is there because
+   * salvage is usually right - most prose is real dialogue that just never got
+   * a wrapper - and the point is not to punish a character for how it phrased
+   * something, it is to stop paying it for not answering at all.
+   */
+  private stillWorth(intent: Intent): Intent {
+    if (!intent.salvagedFromProse || this.proseInARow < 4) {
+      return intent;
+    }
+    // Whatever else it wrote down still counts. Losing a turn's speech is the
+    // correction working; losing the promise it made in the same breath is how
+    // a character stops keeping promises. Same reasoning as askForIntent().
+    return { ...intent, action: 'wait', message: undefined };
+  }
+
+  /**
+   * What to say to a character that has stopped answering in the format.
+   *
+   * Nothing at all while it is answering properly, and nothing for a single
+   * stray reply either: one is a character writing a line of dialogue without
+   * the wrapper, which the salvage already handles and which is not worth
+   * interrupting. It is a run that means the format is gone.
+   *
+   * The wording is about consequences rather than compliance because that is
+   * what is actually wrong: the character is not being disobedient, it thinks
+   * the things it describes are happening. Telling it that it has not moved is
+   * information it does not otherwise have, since the world it is being shown
+   * each turn looks the same as the one it has been narrating.
+   */
+  private correction(): string | null {
+    if (this.proseInARow < 2) {
+      return null;
+    }
+    return [
+      `[Your last ${this.proseInARow} replies had no action in them, so none of`,
+      'what you described happened. You have not moved, opened anything or',
+      'picked anything up. You are standing exactly where you were and the only',
+      'part of it anybody heard was the words. Reply with the JSON object this',
+      'time and let the action do the moving.]'
+    ].join('\n');
   }
 }
 
@@ -205,9 +324,16 @@ export const BOOKKEEPING = [
   'You may also add any of these to the same reply, alongside whatever you are doing:',
   '  "remember": something to keep in mind for the next hour, then forget',
   '  "todo": something you have just taken on and mean to do',
+  '  "askedBy": with "todo", who asked you for it, if this is a favour and not',
+  '            something you decided on your own',
   '  "finished": an item on your list you have just done, by its number',
   '  "gaveUpOn": an item on your list you are dropping, by its number',
-  '  "noted": a place somebody mentioned that you have never been'
+  '  "noted": a place somebody mentioned that you have never been',
+  '  "notThere": a place you were told about, went looking for, and did not find',
+  '  "recall": somebody or somewhere you want to think back on. What you know',
+  '            comes back to you a moment later, so ask before you need it',
+  '  "progressOn" and "learned": something on your list, by its number, and what',
+  '            you have found out about it so far'
 ].join('\n');
 
 /** Everything the character can see, written the way a person would think it. */
@@ -224,9 +350,16 @@ export function describeSituation(situation: Situation): string {
   lines.push(`You are at ${situation.where}.`);
   lines.push(
     situation.others.length > 0
-      ? `Also here: ${situation.others.join(', ')}.`
+      ? `Also here: ${situation.others
+          .map((person) => (person.known ? person.name : `${person.name} (new to you)`))
+          .join(', ')}.`
       : 'Nobody else is here.'
   );
+  if (situation.others.length > 0 && situation.others.every((person) => person.known)) {
+    // Said outright, because otherwise a familiar room full of familiar people
+    // gets greeted from scratch every twelve seconds.
+    lines.push('You know everyone here. Nobody has just walked in.');
+  }
   if (situation.strange) {
     lines.push(
       'You have never been in here before. You do not know what is in this room '
@@ -244,6 +377,13 @@ export function describeSituation(situation: Situation): string {
   }
   if (situation.known) {
     lines.push('', situation.known);
+  }
+  // One line, and only when there is something in the satchel. A character
+  // with empty pockets is told nothing at all, because "you are carrying
+  // nothing" is a fact about the world that never changes on its own and
+  // reads, on the fiftieth tick, as a prompt to go and find something.
+  if (situation.carrying) {
+    lines.push(situation.carrying);
   }
   for (const note of situation.notes) {
     lines.push(note);
@@ -281,39 +421,226 @@ export function lengthGuidance(wordiness: number): string {
 }
 
 /**
+ * The one line of this tick that is worth keeping.
+ *
+ * What gets written into the message history is this, not the brief. A tick
+ * where somebody spoke is remembered as who said what; a quiet tick is
+ * remembered as where the character was standing. Fifty of these cost about as
+ * much as one of the old prompts did, which is the whole point: see
+ * askForIntent below.
+ */
+export function momentOf(situation: Situation): string {
+  if (situation.heard.length > 0) {
+    return situation.heard
+      .map((line) => `${line.from}: "${line.message}"`)
+      .join('\n');
+  }
+  return situation.others.length > 0
+    ? `[${situation.where}, with ${situation.others.map((person) => person.name).join(' and ')}]`
+    : `[${situation.where}, alone]`;
+}
+
+/**
  * Ask the model for one intent. A reply that is not usable becomes "wait":
  * a character that cannot make up its mind stands there, which reads fine and
  * is always safe.
+ *
+ * The brief and the moment are split for a reason. Everything the character can
+ * see right now - the map, the doorways, its plan, the room it is standing in -
+ * is true for this tick and stale by the next one, so it goes in as per-call
+ * instructions, which Mastra sends and does not store. What gets stored is the
+ * moment: one short line saying what was actually said to it.
+ *
+ * That split is what buys the message history back. Storing the brief meant a
+ * remembered turn cost thousands of tokens, fifty of them came to 48,000, and
+ * the provider refused the calls outright - so history had to be switched off
+ * entirely and every character woke up each tick having forgotten the
+ * conversation it was in the middle of. Now a turn costs a line, fifty turns
+ * fit comfortably, and a character can hold a thread long enough to get
+ * somewhere with it instead of greeting the same person forever.
  */
 export async function askForIntent(
   agent: Agent,
-  prompt: string,
-  memory: MemoryScope
+  brief: string,
+  memory: MemoryScope,
+  moment: string,
+  persona: string
 ): Promise<Intent> {
   // The memory scope has to be passed on every call: without it nothing is
   // recalled and nothing is written, and the character quietly has no memory
   // at all while looking like it does.
-  const response = await agent.generate(prompt, { memory, modelSettings: REPLY_BUDGET });
+  const response = await agent.generate(moment, {
+    memory,
+    // This replaces the agent's instructions rather than adding to them, so the
+    // persona has to come along or the character answers as nobody.
+    instructions: `${persona}\n\n${brief}`,
+    modelSettings: REPLY_BUDGET
+  });
+  meter(agent.name ?? agent.id ?? 'someone', 'thinking', response);
   const text = String(response.text ?? '').trim();
-  const json = text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1);
+  const json = firstJsonObject(text);
   if (!json) {
+    if (!text) {
+      return { action: 'wait' };
+    }
     // Say what came back rather than swallowing it. A character standing
     // still because it chose to and one standing still because nothing it
     // said could be read look identical from the outside, and only one of
     // them is a bug.
     console.log('unreadable reply:', text.slice(0, 160));
-    return { action: 'wait' };
+    // A model asked for JSON and answering in prose instead is not the same
+    // failure as answering with nothing: the Wanderer and Guy lost a fifth
+    // and a tenth of their turns this way, and most of what got thrown away
+    // was ordinary in-character speech that just never made it into a
+    // {"action": "say", ...} shell. Binning it is throwing away a good
+    // reply because of how it was wrapped. The one thing prose can be that
+    // is not worth saying out loud is the character working out a route to
+    // itself out loud - see isThinkingAloud() - and that alone is left as
+    // "wait", same as before.
+    if (isThinkingAloud(text)) {
+      console.log('read as thinking aloud, not said:', text.slice(0, 160));
+      return { action: 'wait', salvagedFromProse: true };
+    }
+    return { action: 'say', message: text, salvagedFromProse: true };
   }
   let parsed;
   try {
     parsed = IntentSchema.safeParse(JSON.parse(json));
   } catch (error) {
     console.log('reply was not JSON:', json.slice(0, 160));
-    return { action: 'wait' };
+    // Counted as drift, not as a considered decision to stand still. Without
+    // this a model that has started emitting broken JSON every tick looks, to
+    // the correction in behavior.ts, exactly like a character choosing to wait,
+    // so it is never told anything is wrong and never recovers.
+    return { action: 'wait', salvagedFromProse: true };
   }
   if (!parsed.success) {
     console.log('reply was not an intent:', json.slice(0, 160));
-    return { action: 'wait' };
+    // The action was unreadable; what the character decided to write down may
+    // not have been. Losing a turn's movement is a shrug. Losing the promise it
+    // made in the same breath is how a character stops keeping promises, so
+    // salvage the bookkeeping and stand still for this one.
+    return { ...bookkeepingOf(json), action: 'wait' };
   }
   return parsed.data as Intent;
+}
+
+
+
+
+/**
+ * The first complete JSON object in a reply, rather than the widest span.
+ *
+ * This used to be a slice from the first "{" to the last "}", which is right
+ * for one object with prose either side of it and wrong the moment there are
+ * two. Marren answered with a perfectly good {"action":"say",...}, then thought
+ * better of it and wrote a fuller one underneath, and the slice took both plus
+ * the gap between them. That is not JSON, so the parse threw and she lost the
+ * turn - having twice said what she meant to do.
+ *
+ * Braces are counted rather than matched by regex, because a message is a
+ * string and a string can contain a brace. "{" inside quotes is a character
+ * somebody typed, not structure, and an escaped quote inside that string does
+ * not end it.
+ *
+ * Returns '' when there is no complete object, which is the same thing the old
+ * slice returned for a reply with no braces at all, so prose salvage below
+ * still gets its turn.
+ */
+export function firstJsonObject(text: string): string {
+  const from = text.indexOf('{');
+  if (-1 === from) {
+    return '';
+  }
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let at = from; at < text.length; at++) {
+    const character = text[at];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if ('\\' === character) {
+      escaped = true;
+      continue;
+    }
+    if ('"' === character) {
+      inString = !inString;
+      continue;
+    }
+    if (inString) {
+      continue;
+    }
+    if ('{' === character) {
+      depth++;
+      continue;
+    }
+    if ('}' === character) {
+      depth--;
+      if (0 === depth) {
+        return text.slice(from, at + 1);
+      }
+    }
+  }
+  // Unbalanced: an object that was cut off by the token budget. The widest
+  // span is no better, so this reads as prose and gets salvaged as speech.
+  return '';
+}
+
+/**
+ * Whether a stray line of prose is a character working out a move rather
+ * than something it means for anybody nearby to hear.
+ *
+ * "I need to walk south to reach the doorway. About fifteen paces. Let me
+ * go." is reasoning about a heading, not a remark aimed at somebody in the
+ * room - nobody in this world actually talks to another person that way.
+ * The tell is the combination of a movement verb with a way of measuring the
+ * ground (paces, steps, tiles), or a flat command to itself to get moving.
+ * Cheap and narrow on purpose: it is built to catch that one shape of
+ * thinking-out-loud without also catching ordinary speech that happens to
+ * mention a direction, which the two salvaged examples both did.
+ */
+function isThinkingAloud(text: string): boolean {
+  const movement = /\b(walk|walking|walked|go|going|head|heading|move|moving)\b/i;
+  const distance = /\b(paces?|steps?|tiles?)\b/i;
+  const selfCommand = /\blet me (go|head|walk|move)\b/i;
+  return (movement.test(text) && distance.test(text)) || selfCommand.test(text);
+}
+
+/**
+ * The parts of a reply that are worth keeping even when the rest is not.
+ *
+ * Each field is taken on its own, so one malformed entry cannot cost the
+ * others, and anything that is not a plain string is left behind rather than
+ * guessed at.
+ */
+function bookkeepingOf(json: string): Partial<Intent> {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(json);
+  } catch {
+    return {};
+  }
+  if (!raw || typeof raw !== 'object') {
+    return {};
+  }
+  const source = raw as Record<string, unknown>;
+  const kept: Partial<Intent> = {};
+  for (const field of [
+    'remember',
+    'todo',
+    'askedBy',
+    'finished',
+    'gaveUpOn',
+    'noted',
+    'notThere',
+    'recall'
+  ] as const) {
+    const value = source[field];
+    if (typeof value === 'string' && value.trim()) {
+      kept[field] = value;
+    }
+  }
+  return kept;
 }

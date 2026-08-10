@@ -33,6 +33,7 @@
 import { Agent } from '@mastra/core/agent';
 import { z } from 'zod';
 import { MemoryScope, REPLY_BUDGET } from './behavior.js';
+import { meter } from './spend.js';
 import {
   StepState,
   WorkingMemoryState,
@@ -41,6 +42,7 @@ import {
   describeTodo,
   noteLately,
   noteToSelf,
+  noteOnTodo,
   readMemory,
   settleTodo,
   writeMemory
@@ -59,7 +61,7 @@ export type Goal = {
   why?: string;
 };
 
-export type Step = { what: string; status: StepState; note: string };
+export type Step = { what: string; status: StepState; note: string; tries: number };
 
 /** What the model reports about the step it was working on. */
 export type Progress = 'same' | 'done' | 'blocked';
@@ -67,6 +69,22 @@ export type Progress = 'same' | 'done' | 'blocked';
 const MAX_STEPS = 6;
 /** After this many blocked steps in a row, the plan is not working. Start over. */
 const BLOCKED_BEFORE_REPLAN = 3;
+/**
+ * How many goes at one step before it counts as going nowhere.
+ *
+ * A character reports where it has got to after every action, and "still at it"
+ * is the honest answer to most single ticks. But it is also the answer a model
+ * gives forever when it is chasing something that does not exist: Guy spent an
+ * evening walking to the north path and back announcing he was off to the Grey
+ * Hall, a building the Wanderer had invented, and every one of those ticks was
+ * reported as progress. Nothing in the plan could ever mark it done, so nothing
+ * ever replaced it.
+ *
+ * Six is roughly three minutes of trying at the idle pace. Long enough that a
+ * genuine errand is not cut short, short enough that a wild goose chase ends
+ * the same evening it starts.
+ */
+const STUCK_AFTER = 6;
 
 const StepsSchema = z.object({
   steps: z
@@ -89,7 +107,9 @@ export class Plan {
     private readonly scope: MemoryScope,
     /** The goal the character sheet handed over, if any. Only ever a seed. */
     private readonly seed: Goal | undefined,
-    private readonly memoryOf: () => Promise<any>
+    private readonly memoryOf: () => Promise<any>,
+    /** Whose voice is doing the thinking; see the generate() call in replan(). */
+    private readonly persona = ''
   ) {}
 
   /** What the character is actually after: its own, or the one it was given. */
@@ -183,12 +203,31 @@ export class Plan {
     return true;
   }
 
-  /** Take something on that is nothing to do with the goal. */
-  async take(what: string): Promise<void> {
+  /**
+   * Take something on that is nothing to do with the goal - a chore the
+   * character set itself, or a favour somebody asked for by name. See
+   * addTodo() in memory.ts for what askedBy changes about how it is settled.
+   */
+  async take(what: string, askedBy?: string): Promise<void> {
     if (!this.state) {
       return;
     }
-    this.state = addTodo(this.state, what);
+    this.state = addTodo(this.state, what, Date.now(), askedBy ?? '');
+    await this.save();
+  }
+
+  /**
+   * Write what has been found out against something on the list.
+   *
+   * An item was either untouched or gone, with nothing in between, so a
+   * character that spent an hour half-solving something had nowhere to put the
+   * half. Now the list carries what it learned, and that survives a restart.
+   */
+  async gotSomewhere(which: string, learned: string): Promise<void> {
+    if (!this.state) {
+      return;
+    }
+    this.state = noteOnTodo(this.state, which, learned);
     await this.save();
   }
 
@@ -199,6 +238,24 @@ export class Plan {
     }
     this.state = settleTodo(this.state, which, status);
     await this.save();
+  }
+
+  /**
+   * Write the harness's own fields back over whatever is in memory now.
+   *
+   * Working memory is one record with two writers. The model has a tool for it
+   * and uses it to record people, but it writes the whole record as it
+   * understands it, which drops every field it was never shown - the plan, the
+   * list, the notes, the places. Barnaby, who talks more than he does anything
+   * else, ended up with nothing in memory but the two people he had met.
+   *
+   * Cheap enough to do every tick: save() reads first and merges, so this puts
+   * back what belongs to the harness without touching what belongs to the model.
+   */
+  async keep(): Promise<void> {
+    if (this.state) {
+      await this.save();
+    }
   }
 
   /** Hold something in mind for the next hour. */
@@ -314,11 +371,27 @@ export class Plan {
       }
     } else {
       const current = this.current();
-      if (current && current.status === 'next') {
+      if (current) {
+        const tries = (current.tries ?? 0) + 1;
+        // Enough goes at one step with nothing to show for it is its own kind
+        // of answer, and the character does not have to be the one to admit it.
+        const givingUp = tries >= STUCK_AFTER;
+        if (givingUp) {
+          console.log(`nothing doing after ${tries} goes at "${current.what}"; dropping it`);
+        }
         this.state = {
           ...this.state,
           plan: this.steps.map((step) =>
-            step === current ? { ...step, status: 'doing' as StepState } : step
+            step === current
+              ? {
+                  ...step,
+                  tries,
+                  status: givingUp ? ('blocked' as StepState) : ('doing' as StepState),
+                  note: givingUp
+                    ? `${tries} goes at this and no further on. ${outcome}`.slice(0, 200)
+                    : step.note
+                }
+              : step
           )
         };
       }
@@ -364,10 +437,23 @@ export class Plan {
       ]
         .filter((line) => line !== '')
         .join('\n');
-      const response = await this.agent.generate(prompt, {
-        memory: this.scope,
+      // Same split as askForIntent(): the brief is sent, not stored. And the
+      // exchange itself is not stored either - readOnly - because a stored
+      // planning turn is a JSON exemplar sitting at the newest end of the
+      // thread, and a small model copies the newest exemplar over any amount
+      // of instruction. Guy's first agentic turns answered '{"steps": []}'
+      // to "live the next moment": he was parroting his own last planning
+      // reply, benchmarked and confirmed against six models, of which only
+      // the two strongest overcame it. Planning also holds no tools: it is
+      // deciding, not doing, and a plan that walks off mid-thought is worse
+      // than one written in an armchair.
+      const response = await this.agent.generate('[thinking about what to do next]', {
+        memory: { ...this.scope, options: { readOnly: true } },
+        toolChoice: 'none',
+        instructions: `${this.persona}\n\n${prompt}`,
         modelSettings: REPLY_BUDGET
       });
+      meter(this.agent.name ?? this.agent.id ?? 'someone', 'planning', response);
       const text = String(response.text ?? '');
       const json = text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1);
       const parsed = json ? StepsSchema.safeParse(safeJson(json)) : { success: false as const };
@@ -379,7 +465,12 @@ export class Plan {
         ...this.state,
         // Finished and failed steps are dropped: what they taught went into the
         // prompt above, and carrying them forever turns the plan into a diary.
-        plan: parsed.data.steps.map((what) => ({ what, status: 'next' as StepState, note: '' })),
+        plan: parsed.data.steps.map((what) => ({
+          what,
+          status: 'next' as StepState,
+          note: '',
+          tries: 0
+        })),
         // Stamped with the goal it was made for, so changing the goal - by the
         // character or on its sheet - retires it rather than leaving it to run
         // on toward something nobody wants.

@@ -38,7 +38,10 @@ export type RoomView = {
   heightTiles: number;
 };
 
-const TILE = 32;
+// Exported: actions.ts needs the same tile size to work out a pixel spot
+// beside somebody it can only see the tile of (see walkToSomebody() there),
+// and one shared constant is what keeps the two from ever drifting apart.
+export const TILE = 32;
 /**
  * How far afield to try, in tiles, nearest first.
  *
@@ -133,18 +136,44 @@ export function dedupeDoors(raw: SeenDoor[]): SeenDoor[] {
 }
 
 /** Where a door goes, said the way a person would say it. */
-export function describeDoors(view: RoomView | null, plainName: (scene: string) => string): string {
+export function describeDoors(
+  view: RoomView | null,
+  plainName: (scene: string) => string,
+  at?: { row: number; column: number } | null
+): string {
   const doors = view?.doors ?? [];
   if (doors.length === 0) {
     return '';
   }
   return doors
     .map((door, index) => {
-      const where = door.leadsTo ? plainName(door.leadsTo) : 'somewhere';
+      const where = door.leadsTo ? plainName(door.leadsTo) : 'somewhere else';
       const lock = door.locked ? ', locked' : '';
-      return `- door ${index + 1}: leads to ${where}${lock}`;
+      // Which way it is and how far, because "door 1" and "door 2" are not
+      // things a person can walk towards. A character told only that two doors
+      // exist picks one at random and announces it meant to.
+      const bearing = at ? ` ${wayTo(at, door)}` : '';
+      return `- "${where}":${bearing} doorway${lock}`;
     })
     .join('\n');
+}
+
+/** Which way a door lies from where the character is standing, and how far. */
+function wayTo(at: { row: number; column: number }, door: SeenDoor): string {
+  const down = door.row - at.row;
+  const right = door.column - at.column;
+  const paces = Math.max(Math.abs(down), Math.abs(right));
+  const parts: string[] = [];
+  if (Math.abs(down) > 1) {
+    parts.push(down < 0 ? 'north' : 'south');
+  }
+  if (Math.abs(right) > 1) {
+    parts.push(right < 0 ? 'west' : 'east');
+  }
+  if (parts.length === 0) {
+    return 'right beside you,';
+  }
+  return `${parts.join('-')} of you, about ${paces} paces,`;
 }
 
 /** Keeps track of where a character has already been, room by room. */
