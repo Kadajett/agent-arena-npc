@@ -1,12 +1,13 @@
 /**
  * Pursuing something over weeks.
  *
- * The goal lives on the character sheet and nothing the character learns can
- * touch it. The plan toward it lives in memory, is written by the harness
- * rather than by the model remembering to, and survives a restart. These pin
- * both halves: that a character picks its plan back up where it left off, that
- * a step it reports finished is not offered again, and that a plan which has
- * stopped working gets replaced instead of retried forever.
+ * The goal, the plan toward it, the character's own list and its short-lived
+ * notes all live in memory, are written by the harness rather than by the model
+ * remembering to, and survive a restart. These pin the parts that quietly break
+ * otherwise: that a character picks its plan back up where it left off, that a
+ * step it reported finished is not offered again, that a plan which has stopped
+ * working gets replaced rather than retried forever, and that a goal it chose
+ * for itself is not wiped every time the process restarts.
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -182,15 +183,143 @@ test('what it did lately is remembered, and does not grow forever', async () => 
   assert.match(stored.lately.at(-1), /attempt 29/);
 });
 
-test('the plan lives in memory but the goal never does', async () => {
+test('the goal is kept in memory, where the character can reach it', async () => {
   const memory = fakeMemory();
   const plan = planFor(fakeAgent(['{"steps": ["ask Barnaby"]}']), memory);
   await plan.load();
   await plan.refresh('');
   const stored = memory.read();
   assert.ok(Array.isArray(stored.plan));
-  // Nothing written to memory can restate what the character is for: the goal
-  // is on the sheet, and there is no field here to put a different one in.
-  assert.equal('aim' in stored, false);
-  assert.equal('goal' in stored, false);
+  assert.equal(stored.goal.aim, goal.aim);
+  // Wanting something is not being someone. There is still no field here in
+  // which to write a different self: the persona is a system message memory
+  // never touches.
+  assert.equal('persona' in stored, false);
+  assert.equal('instructions' in stored, false);
+});
+
+test('a character can decide it wants something else, and the old plan goes with it', async () => {
+  const memory = fakeMemory();
+  const plan = planFor(fakeAgent(['{"steps": ["ask the price of the field"]}']), memory);
+  await plan.load();
+  await plan.refresh('');
+  assert.equal(plan.goalIsOwn, true, 'seeded from the sheet, but held as its own');
+
+  const changed = await plan.setGoal(
+    'find out who keeps moving the boundary stone',
+    'somebody admits to moving it',
+    'nobody would sell me the field and I want to know why'
+  );
+  assert.equal(changed, true);
+  assert.equal(plan.current(), null, 'the steps toward the old goal are gone');
+  assert.match(plan.describe(), /boundary stone/);
+  // In its own words, because a character talks itself out of an instruction
+  // more easily than out of its own reason.
+  assert.match(plan.describe(), /You settled on this yourself because: nobody would sell me/);
+});
+
+test('a goal it chose survives a restart, and is not overwritten by its sheet', async () => {
+  const memory = fakeMemory();
+  const first = planFor(fakeAgent(['{"steps": ["ask the price"]}']), memory);
+  await first.load();
+  await first.setGoal('learn to fish', 'you have caught one', 'the field was a dead end');
+
+  // Same character, same sheet, restarted. The sheet has not changed, so the
+  // goal it settled on stands: taking it away every restart makes choosing one
+  // pointless.
+  const second = planFor(fakeAgent([]), memory);
+  await second.load();
+  assert.equal(second.goal.aim, 'learn to fish');
+});
+
+test('editing the sheet still redirects a character that has settled on something', async () => {
+  const memory = fakeMemory();
+  const first = planFor(fakeAgent([]), memory);
+  await first.load();
+  await first.setGoal('learn to fish', 'you have caught one', 'it looked restful');
+
+  // Redeployed with a different goal on the sheet: the operator has changed
+  // their mind, and that is the one way to point a character somewhere new.
+  const second = new Plan(
+    fakeAgent([]),
+    scope,
+    { aim: 'settle what is upstairs at the inn' },
+    async () => memory
+  );
+  await second.load();
+  assert.equal(second.goal.aim, 'settle what is upstairs at the inn');
+  assert.equal(second.current(), null, 'and the fishing plan does not come with it');
+});
+
+test('the same aim set twice is not a change of heart', async () => {
+  const memory = fakeMemory();
+  const plan = planFor(fakeAgent(['{"steps": ["ask Barnaby"]}']), memory);
+  await plan.load();
+  await plan.refresh('');
+
+  assert.equal(await plan.setGoal(goal.aim.toUpperCase(), '', ''), false);
+  assert.equal(plan.current().what, 'ask Barnaby', 'the plan is left alone');
+});
+
+test('the list and the notes are in every brief, alongside the goal', async () => {
+  const memory = fakeMemory();
+  const plan = planFor(fakeAgent(['{"steps": ["ask Barnaby"]}']), memory);
+  await plan.load();
+  await plan.refresh('');
+  await plan.take("bring Barnaby's cup back");
+  await plan.note('the Wanderer went upstairs');
+
+  const brief = plan.describe();
+  assert.match(brief, /buy the field past the east gate/);
+  assert.match(brief, /Work on this now: ask Barnaby/);
+  assert.match(brief, /1\. bring Barnaby's cup back/);
+  assert.match(brief, /the Wanderer went upstairs \(just now\)/);
+  // The reason all of this is repeated on every single call.
+  assert.match(brief, /does not replace it/);
+});
+
+test('an item is crossed off by its number, the way it was shown', async () => {
+  const memory = fakeMemory();
+  const plan = planFor(fakeAgent([]), memory);
+  await plan.load();
+  await plan.take('find the key');
+  await plan.take("bring Barnaby's cup back");
+
+  await plan.settle('2', 'done');
+  const brief = plan.describe();
+  assert.match(brief, /1\. find the key/);
+  assert.doesNotMatch(brief, /1\. bring Barnaby's cup back|2\. /);
+  assert.match(brief, /cup back - done/);
+});
+
+test('a note is gone an hour later, without anything having to run', async () => {
+  const memory = fakeMemory();
+  const plan = planFor(fakeAgent([]), memory);
+  await plan.load();
+  await plan.note('Barnaby is fetching the key');
+  assert.match(plan.describe(), /Barnaby is fetching the key/);
+
+  const anHourAndAbit = Date.now() + 61 * 60 * 1000;
+  assert.doesNotMatch(plan.describe(anHourAndAbit), /fetching the key/);
+});
+
+test('the plan does not overwrite what the rest of memory wrote', async () => {
+  const memory = fakeMemory();
+  const plan = planFor(fakeAgent(['{"steps": ["ask Barnaby"]}']), memory);
+  await plan.load();
+
+  // The harness notes a place between the plan being loaded and saved, which
+  // is the ordinary case: a character walks into a room every few seconds.
+  const state = WorkingMemorySchema.parse(memory.read() ?? {});
+  await memory.updateWorkingMemory({
+    workingMemory: JSON.stringify({
+      ...state,
+      places: [{ where: 'upstairs at the inn', what: 'you have been in', how: 'been', who: '', settled: true }]
+    })
+  });
+
+  await plan.refresh('');
+  const stored = WorkingMemorySchema.parse(memory.read());
+  assert.equal(stored.places.length, 1, 'the room it found is still there');
+  assert.equal(stored.plan.length, 1, 'and so is the plan');
 });

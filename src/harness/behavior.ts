@@ -19,6 +19,17 @@ import { Intent, IntentSchema } from './actions.js';
 /** Where this character's memory lives; passed on every model call. */
 export type MemoryScope = { resource: string; thread: string };
 
+/**
+ * How much the model may write back.
+ *
+ * A character answers with a small JSON object and at most a couple of hundred
+ * words of speech, so a thousand tokens is roomy. Saying so matters because
+ * providers reserve credit against the ceiling rather than the actual reply:
+ * left at the default, every one of these ticks was quoted at 65,536 tokens
+ * and refused outright once the balance dipped below what that would have cost.
+ */
+export const REPLY_BUDGET = { maxOutputTokens: 1024 };
+
 export type Situation = {
   scene: string;
   /** Where the character is, in words. */
@@ -159,7 +170,6 @@ export class Autonomous implements Behavior {
   async next(situation: Situation, memory: MemoryScope): Promise<Intent> {
     const prompt = [
       describeSituation(situation),
-      situation.purpose ? `\n${situation.purpose}` : null,
       '',
       'What do you do next? Choose exactly one:',
       situation.actions,
@@ -174,6 +184,7 @@ export class Autonomous implements Behavior {
           + 'this: "same" if you are still at it, "done" if this finishes it, '
           + '"blocked" if it cannot be done and you want a different plan.'
         : null,
+      BOOKKEEPING,
       lengthGuidance(situation.wordiness)
     ]
       .filter((line): line is string => line !== null)
@@ -182,9 +193,35 @@ export class Autonomous implements Behavior {
   }
 }
 
+/**
+ * What a character may write down while doing something else.
+ *
+ * These ride along with whatever action it chose, rather than being actions of
+ * their own. A character that has to stand still for a turn to make a note will
+ * not make notes, and a character that cannot cross anything off its list ends
+ * up with a list it has stopped reading.
+ */
+export const BOOKKEEPING = [
+  'You may also add any of these to the same reply, alongside whatever you are doing:',
+  '  "remember": something to keep in mind for the next hour, then forget',
+  '  "todo": something you have just taken on and mean to do',
+  '  "finished": an item on your list you have just done, by its number',
+  '  "gaveUpOn": an item on your list you are dropping, by its number',
+  '  "noted": a place somebody mentioned that you have never been'
+].join('\n');
+
 /** Everything the character can see, written the way a person would think it. */
 export function describeSituation(situation: Situation): string {
-  const lines = [`You are at ${situation.where}.`];
+  const lines: string[] = [];
+  // What it is up to comes first, and comes into every prompt built from a
+  // situation - including the one that only decides whether to answer somebody.
+  // Put it in the decide-what-to-do prompt alone and a character keeps its goal
+  // right up until the first person talks to it, then spends the rest of the
+  // day making conversation. See Plan.describe().
+  if (situation.purpose) {
+    lines.push(situation.purpose, '');
+  }
+  lines.push(`You are at ${situation.where}.`);
   lines.push(
     situation.others.length > 0
       ? `Also here: ${situation.others.join(', ')}.`
@@ -256,7 +293,7 @@ export async function askForIntent(
   // The memory scope has to be passed on every call: without it nothing is
   // recalled and nothing is written, and the character quietly has no memory
   // at all while looking like it does.
-  const response = await agent.generate(prompt, { memory });
+  const response = await agent.generate(prompt, { memory, modelSettings: REPLY_BUDGET });
   const text = String(response.text ?? '').trim();
   const json = text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1);
   if (!json) {

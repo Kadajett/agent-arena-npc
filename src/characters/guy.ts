@@ -18,11 +18,12 @@ export const guy: CharacterSheet = {
   homeScene: TOWN,
   persona: loadPersona('guy'),
   model: process.env.NPC_MODEL ?? 'openrouter/deepseek/deepseek-v4-flash',
-  capabilities: ['speak', 'walk', 'doors', 'money'],
+  capabilities: ['speak', 'walk', 'doors', 'money', 'purpose'],
   behavior: (agent: Agent) => new Autonomous(agent),
-  // The thing he is actually here for. He keeps a list of what to do about it
-  // and works one item at a time; the list survives restarts and he cannot talk
-  // himself out of the goal behind it.
+  // Where he starts. He keeps a list of what to do about it and works one item
+  // at a time, and the list survives restarts. Once he has settled this he
+  // picks the next thing himself, which for Guy will be whatever he has decided
+  // somebody is being cagey about.
   goal: {
     aim: "settle what is upstairs at Barnaby's inn. He has never once mentioned "
       + 'it, which you have decided is the interesting part. Go up and look, then '

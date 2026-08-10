@@ -27,6 +27,7 @@ import {
 } from './actions.js';
 import { Explorer, Perception, RoomView, describeDoors } from './explore.js';
 import {
+  BOOKKEEPING,
   Behavior,
   MemoryScope,
   Situation,
@@ -172,6 +173,7 @@ export class Npc {
     // partway through something.
     await this.plan.load();
     if (this.plan.hasGoal) {
+      log(`after: ${this.plan.goal?.aim}${this.plan.goalIsOwn ? ' (its own idea)' : ''}`);
       const current = this.plan.current();
       log(current ? `still working on: ${current.what}` : 'no plan yet');
     }
@@ -242,6 +244,10 @@ export class Npc {
         if (intent.message && !this.worthSaying(toSpeech(intent.message, this.wordiness).join(' '))) {
           intent.message = undefined;
         }
+        // Deciding what it wants is the harness's to write down, because the
+        // harness owns the memory it goes in. Done before the action so the
+        // brief the next tick sees is already the new one.
+        await this.reconsider(intent);
         const result = await actions.perform(intent, scene);
         this.behavior.completed?.(intent, result.ok);
         // Anything that actually went out is part of the conversation, whether
@@ -255,6 +261,7 @@ export class Npc {
           this.notes = [result.note];
         }
         await this.noteHearsay(intent, heard);
+        await this.keepBooks(intent);
         // Write down what was tried and how it went, so the next tick starts
         // from what actually happened rather than from a blank slate, and a
         // step that cannot be done gets abandoned instead of retried forever.
@@ -298,6 +305,55 @@ export class Npc {
   }
 
   /**
+   * Let a character decide it wants something else now.
+   *
+   * Rare and deliberate: it costs the whole plan, and a character that changes
+   * its mind every afternoon never gets anywhere. But one that finished what it
+   * set out to do, or ran into a wall it cannot get past, has to be able to
+   * pick something new or it stands in the town square forever having won.
+   */
+  private async reconsider(intent: Intent): Promise<void> {
+    if (intent.action !== 'set_goal') {
+      return;
+    }
+    const aim = intent.aim?.trim() ?? '';
+    if (!aim) {
+      log('wanted to change tack but did not say to what');
+      return;
+    }
+    const was = this.plan.goal?.aim;
+    const changed = await this.plan.setGoal(aim, intent.done ?? '', intent.why ?? '');
+    if (changed) {
+      log(was ? `done with "${was}". now after: ${aim}` : `decided to go after: ${aim}`);
+    }
+  }
+
+  /**
+   * Everything the character wanted written down while it was doing something
+   * else: a note for the next hour, a thing it has taken on, a thing it has
+   * finished with. These ride along with any action, so making a note never
+   * costs a character a turn of standing still.
+   */
+  private async keepBooks(intent: Intent): Promise<void> {
+    if (intent.remember?.trim()) {
+      await this.plan.note(intent.remember);
+      log('keeping in mind:', intent.remember.trim());
+    }
+    if (intent.todo?.trim()) {
+      await this.plan.take(intent.todo);
+      log('took on:', intent.todo.trim());
+    }
+    if (intent.finished?.trim()) {
+      await this.plan.settle(intent.finished, 'done');
+      log('crossed off:', intent.finished.trim());
+    }
+    if (intent.gaveUpOn?.trim()) {
+      await this.plan.settle(intent.gaveUpOn, 'blocked');
+      log('gave up on:', intent.gaveUpOn.trim());
+    }
+  }
+
+  /**
    * Whether this is worth saying out loud. A model never repeats itself word
    * for word, it just keeps saying the same thing in different words, which is
    * what makes a character sound broken. Comparing what a line is about, not
@@ -324,12 +380,19 @@ export class Npc {
       'If somebody mentions a place you have never been, put it in "noted" as',
       'you would refer to it, so you can go and see for yourself later.',
       '',
+      // Answering somebody is where a character most easily loses the thread of
+      // what it was doing, so this is exactly where it needs to be able to
+      // write things down: a promise made in conversation is a promise it will
+      // otherwise not keep.
+      BOOKKEEPING,
+      '',
       'Reply with JSON and nothing else:',
       '{"action": "say", "message": "...", "noted": "..."} or {"action": "wait"}',
       'In your own voice, no asterisks. ' + lengthGuidance(situation.wordiness)
     ].join('\n');
     const intent = await askForIntent(this.agent, prompt, this.memory);
     await this.noteHearsay(intent, situation.heard);
+    await this.keepBooks(intent);
     if (intent.action !== 'say') {
       return false;
     }

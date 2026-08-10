@@ -19,7 +19,7 @@ export const wanderer: CharacterSheet = {
   homeScene: TOWN,
   persona: loadPersona('wanderer'),
   model: process.env.NPC_MODEL ?? 'openrouter/deepseek/deepseek-v4-flash',
-  capabilities: ['speak', 'walk', 'doors'],
+  capabilities: ['speak', 'walk', 'doors', 'purpose'],
   behavior: (agent: Agent) => new Autonomous(agent),
   goal: {
     aim: 'you have decided the town needs proper names for its places, and that '

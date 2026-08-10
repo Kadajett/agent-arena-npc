@@ -17,7 +17,7 @@ import { ArenaClient, Observation, sceneOf } from './arena.js';
 import { Explorer, RoomView, SeenDoor } from './explore.js';
 import { placesIn, plainSceneName, roomOf } from './world.js';
 
-export const CAPABILITIES = ['speak', 'walk', 'doors', 'fight', 'money'] as const;
+export const CAPABILITIES = ['speak', 'walk', 'doors', 'fight', 'money', 'purpose'] as const;
 export type Capability = (typeof CAPABILITIES)[number];
 
 /**
@@ -34,10 +34,18 @@ const ACTIONS = [
   'use_door',
   'attack',
   'check_money',
+  'set_goal',
   'wait'
 ] as const;
 
-/** What a character decided to do this tick. */
+/**
+ * What a character decided to do this tick.
+ *
+ * One action, plus anything it wants written down while doing it. The
+ * bookkeeping fields are separate from the action on purpose: a character
+ * should be able to walk out of a room and remember why on the same tick,
+ * rather than spending a turn standing still to make a note.
+ */
 export type Intent = {
   action: (typeof ACTIONS)[number];
   place?: string;
@@ -50,6 +58,20 @@ export type Intent = {
    * character notes that it heard it and from whom, and can go and check later.
    */
   noted?: string;
+  /** Something to hold in mind for the next hour, then forget. */
+  remember?: string;
+  /** Something it is taking on, added to its own list. */
+  todo?: string;
+  /** An item on that list it has just finished, by number or by roughly what it was. */
+  finished?: string;
+  /** An item it is giving up on, same way of referring to it. */
+  gaveUpOn?: string;
+  /** With set_goal: what it has decided it is after now. */
+  aim?: string;
+  /** With set_goal: how it would know it had got there. */
+  done?: string;
+  /** With set_goal: why it settled on that, in its own words. */
+  why?: string;
 };
 
 export const IntentSchema = z.object({
@@ -58,7 +80,14 @@ export const IntentSchema = z.object({
   target: z.string().optional(),
   message: z.string().optional(),
   progress: z.enum(['same', 'done', 'blocked']).optional(),
-  noted: z.string().optional()
+  noted: z.string().optional(),
+  remember: z.string().optional(),
+  todo: z.string().optional(),
+  finished: z.string().optional(),
+  gaveUpOn: z.string().optional(),
+  aim: z.string().optional(),
+  done: z.string().optional(),
+  why: z.string().optional()
 });
 
 const ARRIVAL_PIXELS = 40;
@@ -139,6 +168,12 @@ export class Actions {
     if (this.can('money')) {
       lines.push('- "check_money": count what you have saved');
     }
+    if (this.can('purpose')) {
+      lines.push(
+        '- "set_goal": decide what you are after from now on. Needs: aim, done, why.'
+          + ' Only when what you wanted is finished or plainly hopeless.'
+      );
+    }
     lines.push('- "wait": stay where you are');
     return lines.join('\n');
   }
@@ -161,6 +196,10 @@ export class Actions {
         return this.attack(intent.target);
       case 'check_money':
         return this.checkMoney();
+      case 'set_goal':
+        // The harness owns the goal, because it owns the memory it is written
+        // to. It applies this before anything gets here; see npc.ts.
+        return { ok: true, note: 'thought about what you are doing with yourself' };
       default:
         return { ok: true, note: 'stayed put' };
     }

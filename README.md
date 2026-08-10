@@ -41,7 +41,8 @@ starts making its own decisions:
 
 ```
 06:12:41 Guy is in the world (autonomous)
-06:12:41 still working on: find out who owns the field
+06:12:41 after: find out who owns the field
+06:12:41 still working on: ask Barnaby who has the deed
 06:12:44 Guy: Morning. You know who's got the deed on that field east of here?
 ```
 
@@ -85,7 +86,7 @@ Nothing here is baked into the image. Keys live in `.env`, which is gitignored.
 src/
   harness/     the part every character shares
     npc.ts       the loop: observe, answer, act, record
-    plan.ts      goals, and the todo list toward them
+    plan.ts      the goal, the plan toward it, the list, the notes
     memory.ts    what a character may remember, as a schema
     explore.ts   what it can see, and where it has not been yet
     behavior.ts  how a character spends its time
@@ -106,7 +107,7 @@ export const cooper: CharacterSheet = {
   homeScene: TOWN,
   persona: loadPersona('cooper'),     // personas/cooper.md
   model: 'openrouter/deepseek/deepseek-v4-flash',
-  capabilities: ['speak', 'walk', 'doors', 'money'],
+  capabilities: ['speak', 'walk', 'doors', 'money', 'purpose'],
   behavior: (agent) => new Autonomous(agent),
   goal: {
     aim: 'get the mill running again',
@@ -122,8 +123,8 @@ Add it to the `CAST` in `src/index.ts` and run with `NPC_CHARACTER=cooper`.
 
 `capabilities` is the whole of what the character can do. Barnaby has
 `['speak']`, so there is no path by which a model can decide he should leave his
-own inn. Give a character `fight` or `money` and it starts using them the next
-time it runs; nothing else changes.
+own inn. Give a character `fight`, `money` or `purpose` and it starts using them
+the next time it runs; nothing else changes.
 
 `behavior` is what it does when nobody is talking to it:
 
@@ -143,16 +144,25 @@ A model asked "what do you do next?" every twelve seconds, with nothing in front
 of it but the room, does not pursue anything. It reacts. It will walk to the
 east gate, forget why, and walk back. Long-run purpose takes three things:
 
-**The goal is on the character sheet**, next to the persona, and nothing the
-character learns can write to it. A character that can revise its own reason for
-existing has no reason for existing. This is the same rule the memory schema
-enforces: a character may learn anything about the world and nothing about
-itself.
+**The brief is in front of it every single time.** What it wants, the step it is
+on, its own list, and its notes go into every prompt the character is ever
+given, including the ones that are only about whether to answer somebody. A goal
+mentioned once at startup is gone by the second conversation, because after that
+the only things in front of the model are a room and a line of dialogue, and it
+will answer the dialogue. Repeating the brief costs a few hundred tokens a tick
+and is the difference between a character that is up to something and one making
+small talk forever.
 
 **The plan is in memory**, written by the harness rather than by the model
 remembering to save it, and it survives a restart. A todo list that is only
 sometimes written down is worse than none, because the character believes it has
-made progress it has not made. Restart a character mid-plan and it says so.
+made progress it has not made. Restart a character mid-plan and it says so:
+
+```
+04:41:02 Guy is in the world (autonomous)
+04:41:02 after: find out who owns the field (its own idea)
+04:41:02 still working on: ask Barnaby who has the deed
+```
 
 **What happened last is recorded.** Every action's outcome goes into the
 character's memory, so the next tick starts from what actually happened. A step
@@ -175,6 +185,57 @@ what it was trying to do). The harness holds the list and does the writing down.
 You do not have to give a character a goal. Barnaby has none: he is an innkeeper
 and being reliably behind his bar is the whole point of him.
 
+### Wanting something else
+
+A goal on the sheet is a starting point, not a cage. Give a character the
+`purpose` capability and it gets a `set_goal` action: when what it wanted is
+finished, or has plainly hit a wall, it can settle on something new and say why.
+The old plan goes with it, because steps written toward a goal nobody holds any
+more are how a character ends up walking somewhere it has no reason to be.
+
+Two goals can be in play and the rules are worth knowing:
+
+| Situation                              | What happens                                    |
+| -------------------------------------- | ----------------------------------------------- |
+| Empty memory, goal on the sheet         | The sheet seeds it.                             |
+| Character sets its own                  | Its own stands, across restarts.                |
+| Sheet edited to something new           | The new sheet goal wins, and says so in the log.|
+
+That last row is the only way to redirect a character that has settled on
+something, which is deliberate: taking its choice away on every restart would
+make choosing pointless.
+
+What it still cannot do is change who it is. The persona is a system message
+memory never writes to, and the memory schema has no field for a self. Wanting
+something new is not becoming someone else.
+
+### A list, and notes that fade
+
+Two more things a character keeps, both in the same brief:
+
+**Its own list** is for things it took on that have nothing to do with its goal:
+a promise, an errand, a thing it said it would find out. Separate from the plan
+on purpose, since a character that folds every chore into its plan stops making
+progress on the thing it actually wants. It adds items, and crosses them off by
+number.
+
+**Notes fade after an hour.** They are for what matters right now and will not
+matter tomorrow: who just went upstairs, where it left something, what it was in
+the middle of. Expiry is applied when they are read, so a character that was
+restarted sees the same thing as one that never stopped. Anything worth longer
+than an hour has to go on the list or into what it remembers, and making the
+character choose is the point.
+
+All of it rides along with whatever else the character is doing:
+
+```json
+{ "action": "use_door", "place": "upstairs", "message": "Back in a moment.",
+  "remember": "Barnaby went quiet when I asked", "finished": "1" }
+```
+
+A character that has to stand still for a turn to make a note will not make
+notes.
+
 ## What a character knows about the world
 
 Nothing it has not seen, which is deliberate. A character handed a gazetteer of
@@ -196,9 +257,10 @@ Delete the volume and the character forgets everyone.
 
 What may be stored is a schema (`WorkingMemorySchema` in `memory.ts`): people
 met and how the character feels about them, things that happened, places known
-and how they came to be known, the state of its own affairs, its plan, and what
-it did lately. There is no field in which to store a different self, which is
-what stops anything a character is told from becoming who it is.
+and how they came to be known, the state of its own affairs, its goal, its plan,
+its list, its notes, and what it did lately. There is no field in which to store
+a different self, which is what stops anything a character is told from becoming
+who it is.
 
 Conversation is separate: the last 50 lines said in earshot, the character's own
 replies included, in order, so a reply lands in the conversation it belongs to.
