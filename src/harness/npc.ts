@@ -135,6 +135,17 @@ const RECENT_LINES = 8;
  */
 const DIGEST_INTERVAL_MS = 5 * 60 * 1000;
 /**
+ * Attempts allowed within one digest cycle before giving up on it entirely.
+ * The language guard was catching roughly half of all attempts and simply
+ * dropping them - correct, in that garbage never reached Discord, but it
+ * meant a five-minute stretch just vanished from the record instead of
+ * being retried inside the same cycle it already paid the interval for.
+ * Two independent attempts at a coin-flip failure rate clears it more
+ * often than not without meaningfully raising the cost of a cycle that
+ * succeeds on the first try.
+ */
+const DIGEST_MAX_ATTEMPTS = 2;
+/**
  * The reply itself is short - one or two sentences - but the budget cannot
  * be cut down to match it. Confirmed against Bolo directly: a 200-token cap
  * came back with 200 tokens spent and no text at all, because a reasoning
@@ -1127,6 +1138,27 @@ export class Npc {
     if (raw.length === 0) {
       return;
     }
+    for (let attempt = 1; attempt <= DIGEST_MAX_ATTEMPTS; attempt++) {
+      const filed = await this.attemptDigest(raw);
+      if (filed) {
+        const episode = nextEpisode(MEMORY_DIR, this.sheet.id);
+        log(`digest: episode ${episode} - ${filed.title} - ${filed.synopsis}`);
+        await postToDiscord(
+          webhookUrl,
+          `**${this.sheet.playerName} — Episode ${episode}: ${filed.title}**\n${filed.synopsis}`
+        );
+        markEpisodeUsed(MEMORY_DIR, this.sheet.id, episode);
+        return;
+      }
+      if (attempt < DIGEST_MAX_ATTEMPTS) {
+        log(`digest: attempt ${attempt} of ${DIGEST_MAX_ATTEMPTS} unusable, trying again`);
+      }
+    }
+    log(`digest: gave up after ${DIGEST_MAX_ATTEMPTS} attempts, this cycle goes unrecorded`);
+  }
+
+  /** One try at filing an episode from the raw record. Null on any failure - see the callers of looksEnglish(). */
+  private async attemptDigest(raw: string[]): Promise<{ title: string; synopsis: string } | null> {
     try {
       const prompt = [
         `Below is a raw record of what ${this.sheet.playerName} has thought`,
@@ -1162,31 +1194,25 @@ export class Npc {
       const json = text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1);
       const parsed = json ? DigestSchema.safeParse(safeJson(json)) : null;
       if (parsed?.success && looksEnglish(parsed.data.title) && looksEnglish(parsed.data.synopsis)) {
-        const episode = nextEpisode(MEMORY_DIR, this.sheet.id);
-        const { title } = parsed.data;
-        const synopsis = clipSynopsis(parsed.data.synopsis.trim());
-        log(`digest: episode ${episode} - ${title} - ${synopsis}`);
-        await postToDiscord(
-          webhookUrl,
-          `**${this.sheet.playerName} — Episode ${episode}: ${title}**\n${synopsis}`
-        );
-        markEpisodeUsed(MEMORY_DIR, this.sheet.id, episode);
-      } else if (parsed?.success) {
+        return { title: parsed.data.title, synopsis: clipSynopsis(parsed.data.synopsis.trim()) };
+      }
+      if (parsed?.success) {
         // Well-formed JSON, asked for in English, answered in another
         // script anyway - the instruction asking nicely is not the actual
         // guarantee here, the same lesson clipSynopsis() already learned
-        // about "two sentences at the very most". No episode number is
-        // spent on a reply that never went out.
-        log('digest: model answered in the wrong language, skipped:', parsed.data.title);
+        // about "two sentences at the very most".
+        log('digest: model answered in the wrong language:', parsed.data.title);
       } else {
-        // Distinct from "nothing happened" (raw.length === 0, above, which
-        // returns before ever calling the model). This spent real tokens and
-        // still came back with nothing usable, which is a budget or model
-        // problem worth seeing rather than a quiet evening worth skipping.
+        // Distinct from "nothing happened" (raw.length === 0 in the caller,
+        // which never gets this far). This spent real tokens and still came
+        // back with nothing usable, which is a budget or model problem
+        // worth seeing rather than a quiet evening worth skipping.
         log('digest: model spent the call and wrote nothing usable:', text.slice(0, 160));
       }
+      return null;
     } catch (error) {
-      log('digest failed:', (error as Error)?.message ?? error);
+      log('digest attempt failed:', (error as Error)?.message ?? error);
+      return null;
     }
   }
 
