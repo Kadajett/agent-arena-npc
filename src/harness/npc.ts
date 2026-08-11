@@ -174,6 +174,17 @@ function clipSynopsis(text: string): string {
   const lastSpace = cut.lastIndexOf(' ');
   return `${(lastSpace > SYNOPSIS_CHAR_LIMIT * 0.6 ? cut.slice(0, lastSpace) : cut).trimEnd()}...`;
 }
+
+/**
+ * Rough, not a real language detector: true unless too much of the text is
+ * CJK script to plausibly be the English the digest prompt asked for. Cheap
+ * on purpose - this exists to catch the specific failure already seen
+ * (fluent, well-formed Chinese, twice running), not to referee prose.
+ */
+function looksEnglish(text: string): boolean {
+  const han = text.match(/[\u4e00-\u9fff]/g)?.length ?? 0;
+  return han <= text.length * 0.1;
+}
 /**
  * How much of the conversation a character carries in its head.
  *
@@ -1127,7 +1138,8 @@ export class Npc {
         'glancing at a dashboard who was not there and cannot see the lines',
         'above. Nothing claimed that is not actually shown in them. Keep the',
         'synopsis short - two sentences at the very most, the one thing',
-        'worth knowing, not a recap of every line above.',
+        'worth knowing, not a recap of every line above. Write both fields',
+        'in English, regardless of what language anything above is in.',
         '',
         'Reply with JSON and nothing else:',
         '{"title": "...", "synopsis": "..."}'
@@ -1136,13 +1148,20 @@ export class Npc {
         memory: { ...this.memory, options: { readOnly: true } },
         toolChoice: 'none',
         instructions: `${this.persona}\n\n${prompt}`,
-        modelSettings: DIGEST_BUDGET
+        // Temperature pinned, same as the living turn - the one setting
+        // DIGEST_BUDGET does not cover. Left to the provider's own default
+        // this call came back fluent, well-formed, and entirely in Chinese
+        // twice running: a known failure mode of reasoning-model families
+        // trained heavily on Chinese data, more likely to surface on a
+        // short, tool-free, analytical call like this one than on the
+        // living turn, which is longer, has tools, and is pinned already.
+        modelSettings: { ...DIGEST_BUDGET, temperature: 0.3 }
       });
       meter(this.sheet.playerName, 'digesting', response);
       const text = String((response as { text?: string }).text ?? '');
       const json = text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1);
       const parsed = json ? DigestSchema.safeParse(safeJson(json)) : null;
-      if (parsed?.success) {
+      if (parsed?.success && looksEnglish(parsed.data.title) && looksEnglish(parsed.data.synopsis)) {
         const episode = nextEpisode(MEMORY_DIR, this.sheet.id);
         const { title } = parsed.data;
         const synopsis = clipSynopsis(parsed.data.synopsis.trim());
@@ -1152,12 +1171,18 @@ export class Npc {
           `**${this.sheet.playerName} — Episode ${episode}: ${title}**\n${synopsis}`
         );
         markEpisodeUsed(MEMORY_DIR, this.sheet.id, episode);
+      } else if (parsed?.success) {
+        // Well-formed JSON, asked for in English, answered in another
+        // script anyway - the instruction asking nicely is not the actual
+        // guarantee here, the same lesson clipSynopsis() already learned
+        // about "two sentences at the very most". No episode number is
+        // spent on a reply that never went out.
+        log('digest: model answered in the wrong language, skipped:', parsed.data.title);
       } else {
         // Distinct from "nothing happened" (raw.length === 0, above, which
         // returns before ever calling the model). This spent real tokens and
         // still came back with nothing usable, which is a budget or model
         // problem worth seeing rather than a quiet evening worth skipping.
-        // No episode number is spent on a reply that never went out.
         log('digest: model spent the call and wrote nothing usable:', text.slice(0, 160));
       }
     } catch (error) {
