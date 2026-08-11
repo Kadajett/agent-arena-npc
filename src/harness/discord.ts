@@ -1,10 +1,12 @@
 /**
  * Posting a character's own digest of itself out to Discord.
  *
- * A side channel, not a capability. Nothing in the tick loop ever waits on
- * this for correctness, only calls it and moves on - a dropped webhook post
- * costs nobody a turn, the same reasoning as a feeling that failed to show
- * over a character's head. See showFeeling() in actions.ts.
+ * A side channel, not a capability: never worth losing the character's own
+ * turn over, and never allowed to hang the tick loop that awaits it - see
+ * the timeout below. It does, however, tell its caller whether the post
+ * actually landed, because npc.ts needs that to decide whether this episode
+ * number was really spent or is free to try again. "Best effort" describes
+ * how failure is handled, not that failure is invisible to the caller.
  */
 
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -16,19 +18,29 @@ function log(...parts: unknown[]): void {
 /** Discord's own ceiling on one message; longer is rejected outright. */
 const DISCORD_MESSAGE_LIMIT = 2000;
 
-/** Send one message to a Discord incoming webhook. Never throws. */
-export async function postToDiscord(webhookUrl: string, content: string): Promise<void> {
+/**
+ * Send one message to a Discord incoming webhook. Never throws; returns
+ * whether it actually landed, so a rejected or timed-out post can be told
+ * apart from a delivered one rather than both reading as "done".
+ */
+export async function postToDiscord(webhookUrl: string, content: string): Promise<boolean> {
   try {
     const response = await fetch(webhookUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content: content.slice(0, DISCORD_MESSAGE_LIMIT) })
+      body: JSON.stringify({ content: content.slice(0, DISCORD_MESSAGE_LIMIT) }),
+      // Discord hanging, or never answering at all, must not be able to
+      // wedge the character's own tick loop, which awaits this call.
+      signal: AbortSignal.timeout(10_000)
     });
     if (!response.ok) {
       log('discord post refused:', response.status, await response.text().catch(() => ''));
+      return false;
     }
+    return true;
   } catch (error) {
     log('discord post failed:', (error as Error)?.message ?? error);
+    return false;
   }
 }
 

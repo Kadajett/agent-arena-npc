@@ -1100,11 +1100,17 @@ export class Npc {
         log('thought:', thought.slice(0, 160));
       }
       note(this.sheet.playerName, 'did', `turn: ${names || 'nothing but thinking'}`);
-      this.sinceDigest.push(
-        thought
-          ? `${names ? `[${names}] ` : ''}${thought}`
-          : `[${names || 'nothing but thinking'}]`
-      );
+      // Only worth keeping if something is actually going to read it.
+      // maybeDigest() only clears this when DISCORD_WEBHOOK_URL is set, so
+      // buffering unconditionally left it growing for the life of the
+      // process on any deployment that never turns the feature on at all.
+      if (process.env.DISCORD_WEBHOOK_URL) {
+        this.sinceDigest.push(
+          thought
+            ? `${names ? `[${names}] ` : ''}${thought}`
+            : `[${names || 'nothing but thinking'}]`
+        );
+      }
       // The notes were delivered with the situation this turn was given; a
       // correction that has been seen once should not nag forever.
       this.notes = [];
@@ -1143,11 +1149,20 @@ export class Npc {
       if (filed) {
         const episode = nextEpisode(MEMORY_DIR, this.sheet.id);
         log(`digest: episode ${episode} - ${filed.title} - ${filed.synopsis}`);
-        await postToDiscord(
+        const delivered = await postToDiscord(
           webhookUrl,
           `**${this.sheet.playerName} — Episode ${episode}: ${filed.title}**\n${filed.synopsis}`
         );
-        markEpisodeUsed(MEMORY_DIR, this.sheet.id, episode);
+        // Only spend the episode number on a post that actually landed.
+        // Discord refusing or timing out is not the same as nothing worth
+        // filing - it is a delivery failure, and marking it used anyway
+        // would drop this episode forever and leave a silent gap in the
+        // numbering, discovered later with no way to tell what was lost.
+        if (delivered) {
+          markEpisodeUsed(MEMORY_DIR, this.sheet.id, episode);
+        } else {
+          log(`digest: episode ${episode} was not delivered, its number is still free`);
+        }
         return;
       }
       if (attempt < DIGEST_MAX_ATTEMPTS) {
@@ -1187,7 +1202,13 @@ export class Npc {
         // trained heavily on Chinese data, more likely to surface on a
         // short, tool-free, analytical call like this one than on the
         // living turn, which is longer, has tools, and is pinned already.
-        modelSettings: { ...DIGEST_BUDGET, temperature: 0.3 }
+        modelSettings: { ...DIGEST_BUDGET, temperature: 0.3 },
+        // This call is awaited straight from the tick loop, same as the
+        // living turn's own generate() - but unlike that one, a stalled
+        // digest is not the character's actual turn, and has no business
+        // holding the whole loop hostage if the provider hangs. Same
+        // budget arena.ts gives its own gateway calls, see REQUEST_TIMEOUT_MS.
+        abortSignal: AbortSignal.timeout(60_000)
       });
       meter(this.sheet.playerName, 'digesting', response);
       const text = String((response as { text?: string }).text ?? '');
