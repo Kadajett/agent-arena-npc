@@ -77,6 +77,7 @@ npm start
 | `ARENA_PLAYER_NAME`  | The name above their head. Must be unique in the world.           |
 | `ARENA_MCP_URL`      | The game endpoint. Defaults to the public server.                 |
 | `NPC_MEMORY_DIR`     | Where memory is kept. `/npc/var` in the image, on a volume.       |
+| `DISCORD_WEBHOOK_URL`| Optional. Every character posts a one-or-two-sentence digest of itself there every five minutes. Unset means no Discord activity. |
 
 Nothing here is baked into the image. Keys live in `.env`, which is gitignored.
 

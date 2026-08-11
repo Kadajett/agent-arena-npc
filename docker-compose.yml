@@ -16,6 +16,9 @@ services:
       ARENA_MCP_URL: ${ARENA_MCP_URL:-https://mcp.yougotserved.dev/mcp}
       # The name above their head in the world. Must be unique.
       ARENA_PLAYER_NAME: ${ARENA_PLAYER_NAME:-}
+      # Optional. Set to get a five-minute plain-language digest posted to a
+      # Discord channel; unset means no Discord activity at all.
+      DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
     volumes:
       # What the character remembers. Delete it and they forget everyone.
       - npc_var:/npc/var

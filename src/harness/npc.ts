@@ -60,6 +60,8 @@ import { withPrimer } from './primer.js';
 import { withFallback } from './models.js';
 import { skillsFor } from './skills.js';
 import { learnPrices, meter, note } from './spend.js';
+import { markEpisodeUsed, nextEpisode, postToDiscord } from './discord.js';
+import { z } from 'zod';
 import {
   describeLocalKnowledge,
   describePlaces,
@@ -122,6 +124,57 @@ const DEFAULT_IDLE_SECONDS = 90;
 const DEFAULT_ENGAGED_SECONDS = 4;
 const RECENT_LINES = 8;
 /**
+ * How often a character posts a plain-language digest of itself to Discord,
+ * for whoever set DISCORD_WEBHOOK_URL - checked once a tick rather than run
+ * on its own timer, so it never overlaps the character's own turn and never
+ * needs a second connection to anything. Five minutes and not the pace a
+ * character's own sheet sets, because a carouser ticking every twelve
+ * seconds and a guard ticking every ninety should still report on the same
+ * clock; nobody watching a dashboard wants Bolo's version of five minutes
+ * to be six times as talkative as Doran's.
+ */
+const DIGEST_INTERVAL_MS = 5 * 60 * 1000;
+/**
+ * The reply itself is short - one or two sentences - but the budget cannot
+ * be cut down to match it. Confirmed against Bolo directly: a 200-token cap
+ * came back with 200 tokens spent and no text at all, because a reasoning
+ * model burns budget thinking before it writes the answer, and once the cap
+ * lands mid-thought there is nothing left to write the answer with. Plan's
+ * own no-tool call (replan(), in plan.ts) hits the same wall and is given
+ * REPLY_BUDGET's 4096 for it; this is shorter than a plan, not exempt from
+ * the reason a plan needs the room.
+ */
+const DIGEST_BUDGET = { maxOutputTokens: 1024 };
+/** One digest, as an outside viewer would file it rather than as loose prose. */
+const DigestSchema = z.object({
+  title: z.string().min(1).max(80).describe('three to six words, the vibe of the stretch, not a mini-summary'),
+  synopsis: z
+    .string()
+    .min(1)
+    .describe(
+      'the actual report: at most two short sentences, third person, past '
+        + 'tense. Pick the single thing most worth mentioning rather than '
+        + 'listing everything that happened - a synopsis, not a transcript'
+    )
+});
+/**
+ * The instruction above is a request, not a guarantee - Episode 1 came back
+ * as a full paragraph despite being asked for "one or two sentences", so
+ * length is also enforced here rather than trusted to the model. Same idea
+ * as clip() in memory.ts, kept local because MAX_NOTE_CHARS's reasoning
+ * (fits the reply budget, not the room to read it) does not apply here.
+ */
+const SYNOPSIS_CHAR_LIMIT = 280;
+
+function clipSynopsis(text: string): string {
+  if (text.length <= SYNOPSIS_CHAR_LIMIT) {
+    return text;
+  }
+  const cut = text.slice(0, SYNOPSIS_CHAR_LIMIT);
+  const lastSpace = cut.lastIndexOf(' ');
+  return `${(lastSpace > SYNOPSIS_CHAR_LIMIT * 0.6 ? cut.slice(0, lastSpace) : cut).trimEnd()}...`;
+}
+/**
  * How much of the conversation a character carries in its head.
  *
  * This was fifty, on the reasoning that the models are cheap and losing the
@@ -159,6 +212,15 @@ function howLongSince(when: number): string {
 
 function log(...parts: unknown[]): void {
   console.log(new Date().toISOString().slice(11, 19), ...parts);
+}
+
+/** Same job as the private one in plan.ts: a reply that is not JSON is not a crash. */
+function safeJson(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
 }
 
 /** Which tile the character is standing on, for saying which way a door lies. */
@@ -224,6 +286,9 @@ export class Npc {
   private standingIn = '';
   private lastFailure = '';
   private failedWith = 0;
+  /** What it has thought and done since the last Discord digest, raw. */
+  private readonly sinceDigest: string[] = [];
+  private lastDigestAt = Date.now();
 
   constructor(private readonly sheet: CharacterSheet) {
     this.wordiness = sheet.wordiness ?? DEFAULT_WORDS;
@@ -611,6 +676,8 @@ export class Npc {
       // between a character and quietly losing everything the harness knows
       // about it every time it says something.
       await this.plan.keep();
+
+      await this.maybeDigest();
 
       const pace = this.sheet.pace ?? {};
       await sleep(
@@ -1011,6 +1078,11 @@ export class Npc {
         log('thought:', thought.slice(0, 160));
       }
       note(this.sheet.playerName, 'did', `turn: ${names || 'nothing but thinking'}`);
+      this.sinceDigest.push(
+        thought
+          ? `${names ? `[${names}] ` : ''}${thought}`
+          : `[${names || 'nothing but thinking'}]`
+      );
       // The notes were delivered with the situation this turn was given; a
       // correction that has been seen once should not nag forever.
       this.notes = [];
@@ -1018,6 +1090,78 @@ export class Npc {
       const why = String((error as Error)?.message ?? error).slice(0, 200);
       log('turn failed:', why);
       note(this.sheet.playerName, 'failed', `turn: ${why}`);
+    }
+  }
+
+  /**
+   * Post what this character has been up to, in plain language, to Discord -
+   * if DISCORD_WEBHOOK_URL is set and five minutes have actually passed.
+   * Read fresh from the environment rather than cached at startup, so
+   * turning the webhook on or off only ever needs a redeploy, not a code
+   * change. Silent when there is nothing to say: a quiet five minutes is
+   * not worth a line in a channel meant for what happened.
+   *
+   * The call this makes is read-only and tool-free, the same shape Plan
+   * uses to think without acting - see replan() in plan.ts - because summing
+   * up the last five minutes is not itself a moment to live through.
+   */
+  private async maybeDigest(): Promise<void> {
+    const webhookUrl = process.env.DISCORD_WEBHOOK_URL;
+    if (!webhookUrl || Date.now() - this.lastDigestAt < DIGEST_INTERVAL_MS) {
+      return;
+    }
+    const raw = [...this.sinceDigest];
+    this.sinceDigest.length = 0;
+    this.lastDigestAt = Date.now();
+    if (raw.length === 0) {
+      return;
+    }
+    try {
+      const prompt = [
+        `Below is a raw record of what ${this.sheet.playerName} has thought`,
+        'and done over the last few minutes, one line per moment:',
+        '',
+        raw.join('\n'),
+        '',
+        `File this as one episode about ${this.sheet.playerName}, for somebody`,
+        'glancing at a dashboard who was not there and cannot see the lines',
+        'above. Nothing claimed that is not actually shown in them. Keep the',
+        'synopsis short - two sentences at the very most, the one thing',
+        'worth knowing, not a recap of every line above.',
+        '',
+        'Reply with JSON and nothing else:',
+        '{"title": "...", "synopsis": "..."}'
+      ].join('\n');
+      const response = await this.agent.generate('[filing an episode for the last few minutes]', {
+        memory: { ...this.memory, options: { readOnly: true } },
+        toolChoice: 'none',
+        instructions: `${this.persona}\n\n${prompt}`,
+        modelSettings: DIGEST_BUDGET
+      });
+      meter(this.sheet.playerName, 'digesting', response);
+      const text = String((response as { text?: string }).text ?? '');
+      const json = text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1);
+      const parsed = json ? DigestSchema.safeParse(safeJson(json)) : null;
+      if (parsed?.success) {
+        const episode = nextEpisode(MEMORY_DIR, this.sheet.id);
+        const { title } = parsed.data;
+        const synopsis = clipSynopsis(parsed.data.synopsis.trim());
+        log(`digest: episode ${episode} - ${title} - ${synopsis}`);
+        await postToDiscord(
+          webhookUrl,
+          `**${this.sheet.playerName} — Episode ${episode}: ${title}**\n${synopsis}`
+        );
+        markEpisodeUsed(MEMORY_DIR, this.sheet.id, episode);
+      } else {
+        // Distinct from "nothing happened" (raw.length === 0, above, which
+        // returns before ever calling the model). This spent real tokens and
+        // still came back with nothing usable, which is a budget or model
+        // problem worth seeing rather than a quiet evening worth skipping.
+        // No episode number is spent on a reply that never went out.
+        log('digest: model spent the call and wrote nothing usable:', text.slice(0, 160));
+      }
+    } catch (error) {
+      log('digest failed:', (error as Error)?.message ?? error);
     }
   }
 
