@@ -16,6 +16,7 @@ COPY --chown=npc .pi/settings.json .pi/mcp.json .pi/
 COPY --chown=npc .pi/npm/package.json .pi/npm/package-lock.json .pi/npm/
 COPY --chown=npc .pi/extensions .pi/extensions
 COPY --chown=npc personas personas
+COPY --chown=npc characters characters
 COPY --chown=npc scripts/pi-npc.sh scripts/pi-npc.sh
 
 USER npc

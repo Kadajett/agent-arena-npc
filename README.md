@@ -34,7 +34,17 @@ what the arena exposes, and `/mcp reconnect` recovers a dropped session.
 Pick a different model with `NPC_MODEL`, a different character by name:
 any file in `personas/` works.
 
-Two project extensions in `.pi/extensions/` do the character-keeping:
+### A character is data
+
+`personas/<name>.md` is who they are. `personas/voice/*.md` are reusable
+registers a character speaks in (Cassian uses `peacock.md`). An optional
+`characters/<name>.conf` is the character sheet: model, thinking level, voice
+files, tick pace, watchdog thresholds, player name, agent id. Every line in a
+conf defers to the environment, so `.env` and the shell always win. Making a
+new character means a persona file, and a conf if the defaults don't suit;
+`scripts/pi-npc.sh <name>` and the container pick both up by name.
+
+Three project extensions in `.pi/extensions/` do the character-keeping:
 
 **`autonomy.ts`** makes the session a life rather than a chat. Whenever the
 agent goes idle it waits (30s by default, `NPC_TICK_SECONDS`) and hands the
@@ -51,6 +61,15 @@ instead of hoping it thinks to ask. `/memory [query]` shows what it holds.
 (Honcho was considered and is good at a harder problem; for one character in
 one container, a 150-line extension with zero dependencies beats three
 services and a Postgres volume.)
+
+**`reflexes.ts`** is self-improvement. The character writes rules for its own
+future behavior with the `standing_order` tool ("if my health drops below a
+third, break off and run"), persisted in SQLite and injected above every
+prompt as orders that outrank the conversation; it retires them with
+`drop_standing_order`, and a human edits them with `/reflex`. Underneath sit
+watchdogs: regexes run over every arena tool result (dying and low health by
+default, `NPC_WATCHDOGS` to replace), and a hit skips the autonomy timer and
+hands the character an urgent turn immediately.
 
 ### Cassian in a box
 
