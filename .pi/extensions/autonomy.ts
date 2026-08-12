@@ -27,6 +27,8 @@ export default function (pi: ExtensionAPI) {
   let ticker: ReturnType<typeof setInterval> | undefined;
   let fireAt = 0;
   let unsubscribeInput: (() => void) | undefined;
+  let lastEditorText = "";
+  let editorStalls = 0;
 
   const clearPending = () => {
     if (timer) clearTimeout(timer);
@@ -61,10 +63,29 @@ export default function (pi: ExtensionAPI) {
       if (!enabled) return;
       // The agent picked work back up, or a message is already queued.
       if (!ctx.isIdle() || ctx.hasPendingMessages()) return;
-      // The human is mid-thought in the editor: back off a cycle.
-      if (ctx.hasUI && ctx.ui.getEditorText().trim().length > 0) {
-        schedule(ctx);
-        return;
+      // The human is mid-thought in the editor: back off a cycle. But text
+      // that sits unchanged for two full cycles is not a human typing, it is
+      // stray keystrokes from an attach race, and it would otherwise mute
+      // autonomy forever. Clear it and carry on.
+      if (ctx.hasUI) {
+        const editor = ctx.ui.getEditorText();
+        if (editor.trim().length > 0) {
+          if (editor === lastEditorText && ++editorStalls >= 2) {
+            ctx.ui.setEditorText("");
+            ctx.ui.notify(`autonomy: cleared stale editor text "${editor.slice(0, 30)}"`, "info");
+            editorStalls = 0;
+            lastEditorText = "";
+          } else {
+            if (editor !== lastEditorText) editorStalls = 0;
+            lastEditorText = editor;
+            status(ctx, "auto: waiting (editor has text)");
+            schedule(ctx);
+            return;
+          }
+        } else {
+          lastEditorText = "";
+          editorStalls = 0;
+        }
       }
       refreshStatus(ctx);
       pi.sendUserMessage(tickPrompt);
