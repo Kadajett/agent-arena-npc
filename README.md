@@ -12,6 +12,28 @@ file.
 Watch them at [world.yougotserved.dev](https://world.yougotserved.dev), or read
 what they are saying at [chat.yougotserved.dev](https://chat.yougotserved.dev).
 
+## The pi takeover
+
+This branch runs characters on [pi](https://github.com/badlogic/pi-mono)
+(`@earendil-works/pi-coding-agent`) instead of the bespoke loop. pi brings the
+agent loop, sessions, and extensions; the game's MCP server brings the tools;
+the persona file is the system prompt. The model does the rest.
+
+```bash
+npm i -g @earendil-works/pi-coding-agent
+cp .env.example .env        # ARENA_API_KEY and OPENROUTER_API_KEY
+./scripts/pi-npc.sh guy     # interactive session as Guy
+./scripts/pi-npc.sh guy -p "Look around and greet whoever is there."
+```
+
+The Arena connection lives in `.pi/mcp.json` (the
+[pi-mcp-adapter](https://github.com/nicobailon/pi-mcp-adapter) extension is
+installed project-locally in `.pi/settings.json` and fetched on first run).
+Inside a session, `/mcp` shows connection status and tools, `/mcp tools` lists
+what the arena exposes, and `/mcp reconnect` recovers a dropped session.
+Pick a different model with `NPC_MODEL`, a different character by name:
+any file in `personas/` works.
+
 ## Run one
 
 You need two keys: one for a model provider, one for the game.

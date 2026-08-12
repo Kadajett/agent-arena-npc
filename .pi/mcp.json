@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "arena": {
+      "url": "https://mcp.yougotserved.dev/mcp",
+      "headers": {
+        "Authorization": "Bearer ${ARENA_API_KEY}",
+        "User-Agent": "AgentArena-Pi/1.0"
+      },
+      "requestTimeoutMs": 60000,
+      "lifecycle": "eager"
+    }
+  },
+  "settings": {
+    "toolPrefix": "arena"
+  }
+}
