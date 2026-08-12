@@ -1077,9 +1077,15 @@ export class Npc {
       'Live the next moment. Do what you would actually do: look closer, walk',
       'where you mean to go, swing at what needs hitting, say what you have to',
       'say out loud (arena_say is your voice; words written anywhere else are',
-      'thoughts, and nobody hears them). React to how the world answers you - a',
-      'door that refuses, a swing that lands, a price you cannot pay. Stop when',
-      'the moment is spent rather than acting for the sake of it.',
+      'thoughts, and nobody hears them). A turn that only describes a nod, a',
+      'raised cup, a lowered voice - with nothing actually said or done - is a',
+      'turn nobody else in the room experienced at all, whatever it reads like',
+      'from in here. If a moment is worth having, something in it is usually',
+      'worth saying out loud; say the short version rather than only thinking',
+      'it. React to how the world answers you - a door that refuses, a swing',
+      'that lands, a price you cannot pay. Stop when the moment is spent',
+      'rather than acting for the sake of it - but spent means something',
+      'actually happened, not that you thought about it happening.',
       lengthGuidance(situation.wordiness)
     ].join('\n');
     try {
@@ -1092,8 +1098,28 @@ export class Npc {
         modelSettings: { temperature: 0.3 }
       });
       meter(this.sheet.playerName, 'living', response);
-      const called = (response as { toolCalls?: Array<{ toolName?: string }> }).toolCalls ?? [];
-      const names = called.map((call) => call?.toolName ?? 'tool').join(', ');
+      // Mastra's own toolCalls entries carry the tool's name as `name`, not
+      // `toolName` - confirmed against agent.types.d.ts's IterationCompleteContext,
+      // the one place the shape is actually documented. Every turn log line
+      // was quietly falling back to the literal word "tool" for every call,
+      // which made this exact question - is arena_say actually firing? -
+      // impossible to answer from the logs at all. `toolName` is kept as a
+      // fallback rather than removed outright, in case a future SDK version
+      // goes back to it; either way this no longer silently loses the name.
+      // The tool's name lives at call.payload.toolName, confirmed by dumping
+      // the raw response against a live turn - it is not at the top level
+      // under either `name` or `toolName`, both reasonable guesses that
+      // turned out wrong. Every turn log line was quietly printing the
+      // literal word "tool" for every call as a result, which made "is
+      // arena_say actually firing" unanswerable from the logs at all. Both
+      // top-level fields are kept as fallbacks in case a future SDK version
+      // flattens this shape, not because either is confirmed correct now.
+      const called = (
+        response as {
+          toolCalls?: Array<{ toolName?: string; name?: string; payload?: { toolName?: string } }>;
+        }
+      ).toolCalls ?? [];
+      const names = called.map((call) => call?.payload?.toolName ?? call?.name ?? call?.toolName ?? 'tool').join(', ');
       const thought = String((response as { text?: string }).text ?? '').trim();
       log(`turn: ${called.length} action(s)${names ? ` (${names})` : ''}`);
       if (thought) {
@@ -1105,11 +1131,21 @@ export class Npc {
       // buffering unconditionally left it growing for the life of the
       // process on any deployment that never turns the feature on at all.
       if (process.env.DISCORD_WEBHOOK_URL) {
-        this.sinceDigest.push(
-          thought
-            ? `${names ? `[${names}] ` : ''}${thought}`
-            : `[${names || 'nothing but thinking'}]`
-        );
+        // What was actually said out loud, not what was thought about
+        // saying - the digest used to have no way to tell the two apart
+        // and was built entirely on the latter. See the toolCalls shape
+        // note above: the message text lives at payload.args.message.
+        const said = called
+          .filter((call) => (call?.payload?.toolName ?? call?.name ?? call?.toolName) === 'arena_say')
+          .map((call) =>
+            String((call?.payload as { args?: { message?: string } } | undefined)?.args?.message ?? '').trim()
+          )
+          .filter(Boolean);
+        const parts = [
+          ...said.map((line) => `[said] ${line}`),
+          thought ? `[thought] ${thought}` : ''
+        ].filter(Boolean);
+        this.sinceDigest.push(parts.length > 0 ? parts.join(' ') : `[${names || 'nothing but thinking'}]`);
       }
       // The notes were delivered with the situation this turn was given; a
       // correction that has been seen once should not nag forever.
@@ -1161,7 +1197,15 @@ export class Npc {
         if (delivered) {
           markEpisodeUsed(MEMORY_DIR, this.sheet.id, episode);
         } else {
-          log(`digest: episode ${episode} was not delivered, its number is still free`);
+          // The number being free is not enough on its own - freeing it
+          // and then starting the next cycle from a blank buffer would
+          // still lose this whole stretch, just under no number at all
+          // rather than a wrong one. Put the raw record back at the front
+          // of whatever has already accumulated since, so the next cycle
+          // picks up where this one actually left off instead of where it
+          // happened to fail.
+          this.sinceDigest.unshift(...raw);
+          log(`digest: episode ${episode} was not delivered, its number and its content are both still live`);
         }
         return;
       }
@@ -1176,17 +1220,24 @@ export class Npc {
   private async attemptDigest(raw: string[]): Promise<{ title: string; synopsis: string } | null> {
     try {
       const prompt = [
-        `Below is a raw record of what ${this.sheet.playerName} has thought`,
-        'and done over the last few minutes, one line per moment:',
+        `Below is a raw record of what ${this.sheet.playerName} has said and`,
+        'thought over the last few minutes, one line per moment. [said] lines',
+        'are the actual words spoken out loud, where anyone standing there',
+        'could have heard them. [thought] lines are private and unheard -',
+        'useful as color and motive, but never something that happened where',
+        'anybody could see it:',
         '',
         raw.join('\n'),
         '',
         `File this as one episode about ${this.sheet.playerName}, for somebody`,
         'glancing at a dashboard who was not there and cannot see the lines',
-        'above. Nothing claimed that is not actually shown in them. Keep the',
-        'synopsis short - two sentences at the very most, the one thing',
-        'worth knowing, not a recap of every line above. Write both fields',
-        'in English, regardless of what language anything above is in.',
+        'above. Favor [said] lines over [thought] lines when the two would',
+        'lead somewhere different - what he did is the story, what he was',
+        'thinking is only ever the footnote. Nothing claimed that is not',
+        'actually shown in them. Keep the synopsis short - two sentences at',
+        'the very most, the one thing worth knowing, not a recap of every',
+        'line above. Write both fields in English, regardless of what',
+        'language anything above is in.',
         '',
         'Reply with JSON and nothing else:',
         '{"title": "...", "synopsis": "..."}'
