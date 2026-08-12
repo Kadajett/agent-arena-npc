@@ -18,5 +18,5 @@ ban:
   - "waits? for (its|the)"
   - "what do you (read|hear) in"
   - "that('s| is) not an? \\w+, that('s| is)"
-max_sentences: 4
+max_sentences: 6
 max_words: 18
