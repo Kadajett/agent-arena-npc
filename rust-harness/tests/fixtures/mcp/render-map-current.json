@@ -1,0 +1,23 @@
+{
+  "gridAvailable": true,
+  "sceneName": "reldens-town",
+  "map": "#####\n#.@.#\n#####",
+  "sceneSize": {
+    "widthTiles": 40,
+    "heightTiles": 30
+  },
+  "doors": [
+    {
+      "x": 320,
+      "y": 64,
+      "column": 10,
+      "row": 2,
+      "leadsTo": "reldens-forest",
+      "label": "east gate",
+      "locked": true,
+      "lockKnown": true,
+      "requiredKey": "forest-gate-key"
+    }
+  ],
+  "unknownMapRevision": 9182
+}

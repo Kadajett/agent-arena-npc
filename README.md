@@ -9,6 +9,14 @@ Three characters ship with it (Barnaby the innkeeper, the Wanderer, and Guy) and
 they differ only in their character sheet. Writing a fourth means writing one
 file.
 
+> **Rust rewrite:** the new Rig + Ractor multi-brain runtime is being built
+> side-by-side in [`rust-harness/`](rust-harness/README.md). Its Phase 2 session
+> and typed MCP layer are ready for controlled live testing. Tactical packets
+> still do not mutate gameplay. This TypeScript harness remains the production
+> entrypoint until MCP, replay, and live parity are proven. The complete
+> phase plan is in
+> [`docs/plans/harness-rewrite/`](docs/plans/harness-rewrite/README.md).
+
 Watch them at [world.yougotserved.dev](https://world.yougotserved.dev), or read
 what they are saying at [chat.yougotserved.dev](https://chat.yougotserved.dev).
 

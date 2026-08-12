@@ -5,6 +5,9 @@ var/
 *.db
 *.db-shm
 *.db-wal
+rust-harness/target/
+.fastembed_cache/
+deploy/rust-harness/secrets/
 
 # The template, on purpose: it holds names, never values.
 !.env.example

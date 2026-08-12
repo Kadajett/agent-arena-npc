@@ -1,0 +1,11 @@
+{
+  "id": "barnaby",
+  "player_name": "Barnaby",
+  "registration_version": 1,
+  "class_path": "journeyman",
+  "home_scene": "reldens-house-1",
+  "persona_file": "../../personas/barnaby.md",
+  "capabilities": ["speak", "talk_to_folk"],
+  "initial_goal": null,
+  "remembers": true
+}

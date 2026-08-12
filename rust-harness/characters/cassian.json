@@ -1,0 +1,25 @@
+{
+  "id": "cassian",
+  "player_name": "Cassian Vey Unbound",
+  "registration_version": 2,
+  "class_path": "swordsman",
+  "home_scene": "reldens-town",
+  "persona_file": "../../personas/cassian.md",
+  "capabilities": [
+    "speak",
+    "talk_to_folk",
+    "walk",
+    "doors",
+    "fight",
+    "duel",
+    "money",
+    "trade",
+    "purpose"
+  ],
+  "initial_goal": {
+    "aim": "become the greatest warrior-poet alive without submitting to another bardic examination. Find worthy rivals, oppose cruelty, learn techniques worth naming, and earn an audience that makes the guild's opinion irrelevant.",
+    "done": "people in every known place recognize Cassian Vey's deeds and songs without asking for a bardic credential",
+    "why": "the guild confused narrow examination rules with artistic truth, and discussing the details would only dignify its error"
+  },
+  "remembers": true
+}

@@ -1,0 +1,57 @@
+name: agent-arena-rust-npcs
+
+x-harness-service: &harness-service
+  image: local/agent-arena-npc-harness:2026-08-12
+  restart: unless-stopped
+  read_only: true
+  cap_drop: ["ALL"]
+  security_opt: ["no-new-privileges:true"]
+  stop_grace_period: 45s
+  tmpfs:
+    - /tmp:size=64m,mode=1777
+  volumes:
+    - npc_var:/npc/var
+  healthcheck:
+    test: ["CMD-SHELL", "kill -0 1"]
+    interval: 30s
+    timeout: 3s
+    retries: 3
+    start_period: 20s
+  logging:
+    driver: json-file
+    options:
+      max-size: 50m
+      max-file: "5"
+
+services:
+  guy:
+    <<: *harness-service
+    container_name: rust-npc-guy
+    env_file: ["./secrets/guy.env"]
+    environment:
+      NPC_CHARACTER: guy
+      NPC_CHARACTER_SHEET_PATH: /app/rust-harness/characters/guy.json
+      NPC_MEMORY_PATH: /npc/var/rust/guy.sqlite
+
+  barnaby:
+    <<: *harness-service
+    container_name: rust-npc-barnaby
+    env_file: ["./secrets/barnaby.env"]
+    environment:
+      NPC_CHARACTER: barnaby
+      NPC_CHARACTER_SHEET_PATH: /app/rust-harness/characters/barnaby.json
+      NPC_MEMORY_PATH: /npc/var/rust/barnaby.sqlite
+
+  cassian:
+    <<: *harness-service
+    container_name: rust-npc-cassian
+    env_file: ["./secrets/cassian.env"]
+    environment:
+      NPC_CHARACTER: cassian
+      NPC_CHARACTER_SHEET_PATH: /app/rust-harness/characters/cassian.json
+      NPC_MEMORY_PATH: /npc/var/rust/cassian.sqlite
+
+volumes:
+  npc_var:
+    external: true
+    name: deploy_npc_var

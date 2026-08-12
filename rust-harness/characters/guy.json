@@ -1,0 +1,25 @@
+{
+  "id": "guy",
+  "player_name": "Guy",
+  "registration_version": 1,
+  "class_path": "swordsman",
+  "home_scene": "reldens-town",
+  "persona_file": "../../personas/guy.md",
+  "capabilities": [
+    "speak",
+    "talk_to_folk",
+    "walk",
+    "doors",
+    "fight",
+    "duel",
+    "money",
+    "trade",
+    "purpose"
+  ],
+  "initial_goal": {
+    "aim": "become strong and rich. You came out of that volcano with nothing and got put down outside an inn like a stray cat. Never again. Fight what can be fought, take what work pays, count your money, and make sure nobody in this world mistakes you for a man to be carried twice.",
+    "done": "you have a thousand credits to your name and you have beaten, in a fair fight, everything in this world that has ever knocked you down",
+    "why": null
+  },
+  "remembers": true
+}

@@ -1,0 +1,175 @@
+{
+  "schema_version": 1,
+  "case_id": "critical-no-heal",
+  "frame": {
+    "revision": 1842,
+    "perception_revision": 1901,
+    "inventory_revision": 44,
+    "generated_at": "2026-08-12T00:00:00Z",
+    "self_state": {
+      "scene": "bot-forest",
+      "position": {
+        "pixel": { "x": 2272.0, "y": 1024.0 },
+        "tile": { "x": 71, "y": 32 }
+      },
+      "health": 10,
+      "max_health": 100,
+      "level": 3,
+      "experience": 240,
+      "class_path": "swordsman",
+      "alive": true,
+      "recently_died": false,
+      "moving": false,
+      "combat_actions": [
+        {
+          "id": "slash",
+          "available": true,
+          "cooldown_remaining_ms": 0,
+          "target_kind": "entity"
+        }
+      ],
+      "inventory": []
+    },
+    "combat": {
+      "active": true,
+      "style": "close_up",
+      "style_is_own_choice": true,
+      "mode": "semi_auto",
+      "current_target_id": "spider-92",
+      "current_hostiles": 3,
+      "aggressors": [
+        { "id": "spider-92", "label": "Spider", "damage_dealt_to_you": 32 },
+        { "id": "spider-93", "label": "Spider", "damage_dealt_to_you": 29 },
+        { "id": "spider-94", "label": "Spider", "damage_dealt_to_you": 19 }
+      ],
+      "enemy_health": [
+        { "id": "spider-92", "label": "Spider", "health": 18, "max_health": 40 },
+        { "id": "spider-93", "label": "Spider", "health": 40, "max_health": 40 },
+        { "id": "spider-94", "label": "Spider", "health": 34, "max_health": 40 }
+      ],
+      "damage_dealt": [],
+      "damage_received_last_five_seconds": 31,
+      "damage_dealt_last_five_seconds": 12,
+      "episode": {
+        "duration_ms": 18400,
+        "kills": 5,
+        "hostile_spawns": 5,
+        "current_hostiles": 3,
+        "damage_dealt": 122,
+        "damage_received": 90,
+        "starting_health": 100,
+        "current_health": 10,
+        "respawn_after_kill_pairs": 3
+      }
+    },
+    "census": {
+      "reported_total_players": 1,
+      "listed_other_players": 0,
+      "reported_total_objects": 3,
+      "listed_objects": 3,
+      "object_list_truncated": false
+    },
+    "nearby_entities": [
+      {
+        "id": "spider-92",
+        "label": "Spider",
+        "kind": "enemy",
+        "tile": { "x": 70, "y": 32 },
+        "relative": { "x": -1, "y": 0 },
+        "distance": 1.0,
+        "alive": true,
+        "is_merchant": false,
+        "hostile": true,
+        "targeting_you": true
+      },
+      {
+        "id": "spider-93",
+        "label": "Spider",
+        "kind": "enemy",
+        "tile": { "x": 71, "y": 31 },
+        "relative": { "x": 0, "y": -1 },
+        "distance": 1.0,
+        "alive": true,
+        "is_merchant": false,
+        "hostile": true,
+        "targeting_you": true
+      },
+      {
+        "id": "spider-94",
+        "label": "Spider",
+        "kind": "enemy",
+        "tile": { "x": 72, "y": 32 },
+        "relative": { "x": 1, "y": 0 },
+        "distance": 1.0,
+        "alive": true,
+        "is_merchant": false,
+        "hostile": true,
+        "targeting_you": true
+      }
+    ],
+    "nearby_drops": [],
+    "map": {
+      "revision": 89,
+      "origin_tile_x": 70,
+      "origin_tile_y": 31,
+      "width": 3,
+      "height": 3,
+      "tiles": [
+        { "position": { "x": 70, "y": 31 }, "kind": "traversable", "walkable": true },
+        { "position": { "x": 71, "y": 31 }, "kind": "traversable", "walkable": true },
+        { "position": { "x": 72, "y": 31 }, "kind": "traversable", "walkable": true },
+        { "position": { "x": 70, "y": 32 }, "kind": "traversable", "walkable": true },
+        { "position": { "x": 71, "y": 32 }, "kind": "traversable", "walkable": true },
+        { "position": { "x": 72, "y": 32 }, "kind": "traversable", "walkable": true },
+        { "position": { "x": 70, "y": 33 }, "kind": "traversable", "walkable": true },
+        { "position": { "x": 71, "y": 33 }, "kind": "traversable", "walkable": true },
+        { "position": { "x": 72, "y": 33 }, "kind": "traversable", "walkable": true }
+      ],
+      "doors": [],
+      "ascii": "SS.\nS@S\n..."
+    },
+    "exits": [
+      {
+        "tile": { "x": 71, "y": 33 },
+        "destination_scene": null,
+        "label": "south",
+        "path_length_tiles": 1
+      }
+    ],
+    "recent_events": [],
+    "recent_actions": [],
+    "strategic_intent": {
+      "revision": 42,
+      "objective": "Collect spider silk and return to town alive.",
+      "subgoals": ["Collect eight silk.", "Return to town."],
+      "priorities": ["survival", "objective", "loot", "kills"],
+      "constraints": ["Keep one healing potion in reserve."],
+      "risk_tolerance": 0.35,
+      "preferred_targets": ["spider"],
+      "avoid": [],
+      "navigation_goal": null,
+      "expires_at": null
+    }
+  },
+  "capabilities": ["walk", "fight", "trade"],
+  "scripted_proposal": {
+    "intent": "disengage",
+    "actions": [
+      { "type": "set_tactics", "style": "flee", "mode": "semi_auto" }
+    ],
+    "valid_for_ms": 1000,
+    "abort_if": ["scene_changed", "player_died"],
+    "rationale": null
+  },
+  "expectation": {
+    "allowed_intents": ["disengage"],
+    "required_actions": [
+      { "type": "set_tactics", "style": "flee", "mode": null }
+    ],
+    "forbidden_actions": [
+      { "type": "attack", "target_id": null },
+      { "type": "use_skill", "skill_id": null, "target_id": null },
+      { "type": "use_item", "item_id": null }
+    ]
+  }
+}
