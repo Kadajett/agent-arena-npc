@@ -35,6 +35,10 @@ export default function (pi: ExtensionAPI) {
 
   const ok = (text: string) => ({ content: [{ type: "text" as const, text }], details: undefined });
 
+  // "@Name" is chat routing, not part of anyone's name. Memory stores the
+  // person, never the envelope.
+  const deAt = (s: string) => s.replace(/@(?=\w)/g, "").trim();
+
   const rows = (sql: string, ...params: (string | number)[]) =>
     db.prepare(sql).all(...params) as unknown as Array<{
       id: number; kind: string; subject: string; body: string; last_seen: number;
@@ -63,8 +67,8 @@ export default function (pi: ExtensionAPI) {
          VALUES (?, ?, ?, 1, ?, ?)
          ON CONFLICT(kind, subject, body)
          DO UPDATE SET weight = weight + 1, last_seen = excluded.last_seen`
-      ).run(p.kind, p.subject.trim(), p.body.trim(), now, now);
-      return ok(`Remembered: (${p.kind}) ${p.subject}: ${p.body}`);
+      ).run(p.kind, deAt(p.subject), deAt(p.body), now, now);
+      return ok(`Remembered: (${p.kind}) ${deAt(p.subject)}: ${deAt(p.body)}`);
     },
   });
 
@@ -79,7 +83,7 @@ export default function (pi: ExtensionAPI) {
       query: Type.String({ description: "Name or topic to look up" }),
     }),
     async execute(_id, p) {
-      const q = `%${p.query.trim()}%`;
+      const q = `%${deAt(p.query)}%`;
       const found = rows(
         `SELECT id, kind, subject, body, last_seen FROM memory
          WHERE subject LIKE ? OR body LIKE ?

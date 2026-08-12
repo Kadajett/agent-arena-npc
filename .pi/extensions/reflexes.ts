@@ -79,6 +79,9 @@ export default function (pi: ExtensionAPI) {
 
   const ok = (text: string) => ({ content: [{ type: "text" as const, text }], details: undefined });
 
+  // "@Name" is chat routing, never stored language.
+  const deAt = (s: string) => s.replace(/@(?=\w)/g, "").trim();
+
   pi.registerTool({
     name: "standing_order",
     label: "Standing order",
@@ -91,8 +94,8 @@ export default function (pi: ExtensionAPI) {
     async execute(_id, p) {
       db.prepare(
         `INSERT OR IGNORE INTO standing_order (orders, created_at) VALUES (?, ?)`
-      ).run(p.order.trim(), Date.now());
-      return ok(`Standing order adopted: ${p.order.trim()}`);
+      ).run(deAt(p.order), Date.now());
+      return ok(`Standing order adopted: ${deAt(p.order)}`);
     },
   });
 
