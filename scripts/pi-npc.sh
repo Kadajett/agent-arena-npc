@@ -39,8 +39,9 @@ if [ -n "${NPC_MEMORY_DIR:-}" ]; then
 fi
 
 exec pi --provider openrouter --model "$MODEL" \
+  --thinking "${NPC_THINKING:-low}" \
   "${SESSION_ARGS[@]}" \
   --no-builtin-tools \
   --append-system-prompt "$PERSONA" \
-  --append-system-prompt "You are a character living inside Agent Arena. The arena MCP tools are your body: use them to look around, move, speak, and act. Speak only in character, a sentence or two at a time. Keep pursuing whatever you are up to; when someone talks to you, answer first." \
+  --append-system-prompt "You are a character living inside Agent Arena. The arena MCP tools are your body: use them to look around, move, speak, and act. When the game asks for your player name, it is exactly '${ARENA_PLAYER_NAME:-$CHARACTER}'. Speak only in character, a sentence or two at a time. Keep pursuing whatever you are up to; when someone talks to you, answer first." \
   "$@"

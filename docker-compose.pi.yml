@@ -17,10 +17,11 @@ services:
     restart: unless-stopped
     volumes:
       - cassian_var:/npc/var
-      # pi keeps its agent state (sessions, auth) under the home directory,
-      # which the read-only root would otherwise forbid.
+      # pi keeps its agent state (sessions, auth) under the home directory.
       - cassian_home:/home/npc/.pi
-    read_only: true
+    # No read-only root: pi takes mkdir-based locks beside its project
+    # settings just to load packages, so the filesystem has to give a little.
+    # Everything else stays clamped.
     tmpfs:
       - /tmp
     security_opt:

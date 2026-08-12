@@ -74,12 +74,11 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("session_start", async (_event, ctx) => {
     if (ctx.hasUI && !unsubscribeInput) {
-      // Any keystroke means the human is steering: drop the pending tick.
+      // Any keystroke means the human is steering: push the pending tick
+      // back to a full interval. Cancelling outright would strand autonomy,
+      // since nothing reschedules until the next agent_settled.
       unsubscribeInput = ctx.ui.onTerminalInput(() => {
-        if (timer) {
-          clearPending();
-          refreshStatus(ctx);
-        }
+        if (timer) schedule(ctx);
         return undefined; // never consume input
       });
     }
@@ -95,10 +94,10 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("input", async (event, ctx) => {
-    if (event.source !== "extension") {
-      clearPending();
-      refreshStatus(ctx);
-    }
+    // A submitted human message will start a run (agent_start clears, and
+    // agent_settled reschedules); a slash command will not, so reset rather
+    // than strand the loop.
+    if (event.source !== "extension" && timer) schedule(ctx);
     return { action: "continue" as const };
   });
 
