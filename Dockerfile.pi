@@ -1,0 +1,34 @@
+# A character that is just pi, a persona, and the game's MCP server.
+# The heavy lifting (loop, tools, sessions) is pi's; this image only has to
+# carry it. node:24-slim over alpine because pi-mcp-adapter pulls native
+# modules (keyring, recheck) whose prebuilds target glibc.
+FROM node:24-slim
+
+RUN npm install -g @earendil-works/pi-coding-agent && npm cache clean --force
+
+RUN useradd --create-home --uid 10003 npc
+WORKDIR /npc
+RUN mkdir -p /npc/var && chown npc:npc /npc /npc/var
+
+# Project-level pi config: extensions, MCP wiring, and the installed
+# pi-mcp-adapter package. Installing at build time keeps first start offline.
+COPY --chown=npc .pi/settings.json .pi/mcp.json .pi/
+COPY --chown=npc .pi/npm/package.json .pi/npm/package-lock.json .pi/npm/
+COPY --chown=npc .pi/extensions .pi/extensions
+COPY --chown=npc personas personas
+COPY --chown=npc scripts/pi-npc.sh scripts/pi-npc.sh
+
+USER npc
+RUN npm ci --prefix .pi/npm && npm cache clean --force
+
+# The container runs exactly one project, ours, so pi may trust it without a
+# prompt it has no human to show.
+RUN mkdir -p /home/npc/.pi/agent \
+  && echo '{ "defaultProjectTrust": "always" }' > /home/npc/.pi/agent/settings.json
+
+# Sessions and character memory live here, on a volume.
+ENV NPC_MEMORY_DIR=/npc/var
+VOLUME /npc/var
+
+ENTRYPOINT ["./scripts/pi-npc.sh"]
+CMD ["cassian"]

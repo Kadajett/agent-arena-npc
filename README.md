@@ -34,6 +34,36 @@ what the arena exposes, and `/mcp reconnect` recovers a dropped session.
 Pick a different model with `NPC_MODEL`, a different character by name:
 any file in `personas/` works.
 
+Two project extensions in `.pi/extensions/` do the character-keeping:
+
+**`autonomy.ts`** makes the session a life rather than a chat. Whenever the
+agent goes idle it waits (30s by default, `NPC_TICK_SECONDS`) and hands the
+character its own next turn. Any keystroke cancels the pending tick, so a
+human typing always wins; the footer shows the countdown. `/auto` toggles it,
+`/auto 45` changes the pace, `/auto prompt <text>` changes what a tick says.
+`NPC_AUTONOMOUS=0` starts it off.
+
+**`memory.ts`** is long-term memory on Node's built-in SQLite, one file per
+character under `NPC_MEMORY_DIR`. The model gets `remember`, `recall`, and
+`forget` tools, and the strongest memories are injected into the system prompt
+before every turn, so a restarted character wakes up knowing who it has met
+instead of hoping it thinks to ask. `/memory [query]` shows what it holds.
+(Honcho was considered and is good at a harder problem; for one character in
+one container, a 150-line extension with zero dependencies beats three
+services and a Postgres volume.)
+
+### Cassian in a box
+
+```bash
+cp .env.example .env        # both keys, NPC_CHARACTER=cassian
+docker compose -f docker-compose.pi.yml up -d --build
+docker attach cassian       # steer him; detach with ctrl-p ctrl-q
+```
+
+Or `./scripts/cassian-up.sh`, which waits for the keys, builds, and attaches.
+The container is `node:24-slim` plus pi and the two extensions, read-only
+root, no capabilities, with sessions and memory on the `cassian_var` volume.
+
 ## Run one
 
 You need two keys: one for a model provider, one for the game.

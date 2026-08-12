@@ -1,5 +1,10 @@
 node_modules
 dist
 var
-.env
+rust-harness
+.fastembed_cache
 .git
+.env
+*.db
+deploy
+docs

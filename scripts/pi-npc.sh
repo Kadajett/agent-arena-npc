@@ -15,6 +15,8 @@ set +a
 
 CHARACTER="${1:-${NPC_CHARACTER:-guy}}"
 shift || true
+# The memory extension names its database after this.
+export NPC_CHARACTER="$CHARACTER"
 PERSONA="personas/${CHARACTER}.md"
 if [ ! -f "$PERSONA" ]; then
   echo "No persona at $PERSONA. Pick one of:" >&2
@@ -28,7 +30,16 @@ fi
 MODEL="${NPC_MODEL:-openrouter/deepseek/deepseek-v4-flash}"
 MODEL="${MODEL#openrouter/}"
 
+# In the container this is a volume, so a restarted character can resume its
+# last session instead of waking up blank.
+SESSION_ARGS=()
+if [ -n "${NPC_MEMORY_DIR:-}" ]; then
+  mkdir -p "$NPC_MEMORY_DIR/sessions"
+  SESSION_ARGS=(--session-dir "$NPC_MEMORY_DIR/sessions")
+fi
+
 exec pi --provider openrouter --model "$MODEL" \
+  "${SESSION_ARGS[@]}" \
   --no-builtin-tools \
   --append-system-prompt "$PERSONA" \
   --append-system-prompt "You are a character living inside Agent Arena. The arena MCP tools are your body: use them to look around, move, speak, and act. Speak only in character, a sentence or two at a time. Keep pursuing whatever you are up to; when someone talks to you, answer first." \

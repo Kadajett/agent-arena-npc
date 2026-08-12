@@ -1,0 +1,36 @@
+# The pi-era character container. Interactive on purpose: attach to steer,
+# detach and the character keeps looping.
+#
+#   docker compose -f docker-compose.pi.yml up -d --build
+#   docker attach cassian          # steer; detach with ctrl-p ctrl-q
+services:
+  cassian:
+    build:
+      context: .
+      dockerfile: Dockerfile.pi
+    container_name: cassian
+    env_file: .env
+    environment:
+      NPC_CHARACTER: cassian
+    stdin_open: true
+    tty: true
+    restart: unless-stopped
+    volumes:
+      - cassian_var:/npc/var
+      # pi keeps its agent state (sessions, auth) under the home directory,
+      # which the read-only root would otherwise forbid.
+      - cassian_home:/home/npc/.pi
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 128
+    cpus: "0.75"
+    mem_limit: 768m
+
+volumes:
+  cassian_var:
+  cassian_home:
