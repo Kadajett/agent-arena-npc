@@ -112,6 +112,9 @@ export default function (pi: ExtensionAPI) {
         },
         body: JSON.stringify({
           model,
+          // Reasoning models burn the whole budget thinking and return null
+          // content; a voice re-render needs none of it.
+          reasoning: { enabled: false },
           messages: [
             { role: "system", content: voicePrefix() },
             { role: "user", content: payload },
