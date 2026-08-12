@@ -163,27 +163,41 @@ const DigestSchema = z.object({
     .string()
     .min(1)
     .describe(
-      'the actual report: at most two short sentences, third person, past '
-        + 'tense. Pick the single thing most worth mentioning rather than '
+      'what actually happened, externally: at most two short sentences, '
+        + 'third person, past tense, built on [said] lines over [thought] '
+        + 'ones. Pick the single thing most worth mentioning rather than '
         + 'listing everything that happened - a synopsis, not a transcript'
+    ),
+  innerThoughts: z
+    .string()
+    .min(1)
+    .describe(
+      'the internal reality behind it, in fragments rather than full '
+        + 'sentences - a handful of themes or half-thoughts, comma-separated, '
+        + 'drawn from [thought] lines. Not a second synopsis: the synopsis is '
+        + 'what a bystander saw, this is what nobody but him knew he was '
+        + 'carrying while it happened'
     )
 });
 /**
- * The instruction above is a request, not a guarantee - Episode 1 came back
- * as a full paragraph despite being asked for "one or two sentences", so
- * length is also enforced here rather than trusted to the model. Same idea
- * as clip() in memory.ts, kept local because MAX_NOTE_CHARS's reasoning
- * (fits the reply budget, not the room to read it) does not apply here.
+ * Both descriptions above are a request, not a guarantee - Episode 1 came
+ * back as a full paragraph despite being asked for "one or two sentences",
+ * so length is also enforced here rather than trusted to the model. Same
+ * idea as clip() in memory.ts, kept local because MAX_NOTE_CHARS's
+ * reasoning (fits the reply budget, not the room to read it) does not
+ * apply here.
  */
 const SYNOPSIS_CHAR_LIMIT = 280;
+/** Meant as fragments, not sentences - shorter than the synopsis on purpose. */
+const INNER_THOUGHTS_CHAR_LIMIT = 140;
 
-function clipSynopsis(text: string): string {
-  if (text.length <= SYNOPSIS_CHAR_LIMIT) {
+function clipText(text: string, limit: number): string {
+  if (text.length <= limit) {
     return text;
   }
-  const cut = text.slice(0, SYNOPSIS_CHAR_LIMIT);
+  const cut = text.slice(0, limit);
   const lastSpace = cut.lastIndexOf(' ');
-  return `${(lastSpace > SYNOPSIS_CHAR_LIMIT * 0.6 ? cut.slice(0, lastSpace) : cut).trimEnd()}...`;
+  return `${(lastSpace > limit * 0.6 ? cut.slice(0, lastSpace) : cut).trimEnd()}...`;
 }
 
 /**
@@ -1088,39 +1102,72 @@ export class Npc {
       'actually happened, not that you thought about it happening.',
       lengthGuidance(situation.wordiness)
     ].join('\n');
+    // The tool's name lives at call.payload.toolName - not at the top
+    // level under either `name` or `toolName`, both reasonable guesses
+    // that turned out wrong, confirmed by dumping a live response rather
+    // than trusting the SDK's own (differently-shaped) type exports.
+    // Every turn log line was quietly printing the literal word "tool"
+    // for every call as a result, which made "is arena_say actually
+    // firing" unanswerable from the logs at all. Both top-level fields
+    // are kept as fallbacks in case a future SDK version flattens this
+    // shape, not because either is confirmed correct now.
+    const toolNameOf = (call: { toolName?: string; name?: string; payload?: { toolName?: string } }): string =>
+      call?.payload?.toolName ?? call?.name ?? call?.toolName ?? 'tool';
+    type ToolCall = { toolName?: string; name?: string; payload?: { toolName?: string; args?: { message?: string } } };
     try {
-      const response = await this.agent.generate(momentOf(situation), {
-        memory: this.memory,
-        // Replaces the agent's instructions rather than adding to them, so the
-        // persona has to come along or the character acts as nobody.
-        instructions: [this.persona, describeSituation(situation), guidance].join('\n\n'),
-        maxSteps: STEPS_PER_TURN,
-        modelSettings: { temperature: 0.3 }
-      });
-      meter(this.sheet.playerName, 'living', response);
-      // Mastra's own toolCalls entries carry the tool's name as `name`, not
-      // `toolName` - confirmed against agent.types.d.ts's IterationCompleteContext,
-      // the one place the shape is actually documented. Every turn log line
-      // was quietly falling back to the literal word "tool" for every call,
-      // which made this exact question - is arena_say actually firing? -
-      // impossible to answer from the logs at all. `toolName` is kept as a
-      // fallback rather than removed outright, in case a future SDK version
-      // goes back to it; either way this no longer silently loses the name.
-      // The tool's name lives at call.payload.toolName, confirmed by dumping
-      // the raw response against a live turn - it is not at the top level
-      // under either `name` or `toolName`, both reasonable guesses that
-      // turned out wrong. Every turn log line was quietly printing the
-      // literal word "tool" for every call as a result, which made "is
-      // arena_say actually firing" unanswerable from the logs at all. Both
-      // top-level fields are kept as fallbacks in case a future SDK version
-      // flattens this shape, not because either is confirmed correct now.
-      const called = (
-        response as {
-          toolCalls?: Array<{ toolName?: string; name?: string; payload?: { toolName?: string } }>;
+      const generateOnce = (extra?: string, forceAction = false) =>
+        this.agent.generate(momentOf(situation), {
+          memory: this.memory,
+          // Replaces the agent's instructions rather than adding to them, so
+          // the persona has to come along or the character acts as nobody.
+          instructions: [this.persona, describeSituation(situation), guidance, extra]
+            .filter(Boolean)
+            .join('\n\n'),
+          maxSteps: STEPS_PER_TURN,
+          // Only forced on the retry, never the first attempt: a turn with
+          // genuinely nothing worth doing is a real outcome the first time
+          // round. It stops being a real outcome the second time, once the
+          // model has already been told plainly that a real thought went
+          // unacted on and asked directly to act on it now - asking a
+          // second time, the same way, was not enough on its own; see the
+          // retry below, which came back with zero tool calls twice in a
+          // row even carrying that direct instruction.
+          ...(forceAction ? { toolChoice: 'required' as const } : {}),
+          modelSettings: { temperature: 0.3 }
+        });
+      const first = await generateOnce();
+      meter(this.sheet.playerName, 'living', first);
+      let called = (first as { toolCalls?: ToolCall[] }).toolCalls ?? [];
+      let thought = String((first as { text?: string }).text ?? '').trim();
+      // Guidance alone did not hold: watched Bolo narrate a turn addressed
+      // directly to another character by name - "Sherlock, hold a moment
+      // before you go..." - as pure unvoiced thought, zero tool calls,
+      // after the guidance above already told him plainly not to. One
+      // retry, with the actual stalled thought quoted back and a direct
+      // instruction to act on it now rather than describe it again - the
+      // same "asking nicely is not enough, so also enforce it" lesson the
+      // digest's own length and language guards already learned.
+      if (called.length === 0 && thought.length > 20) {
+        log('turn: no action taken despite a real thought, trying once more');
+        const nudge = [
+          'Your reply just now, for this same moment, was:',
+          '',
+          thought,
+          '',
+          'No tool was called, so none of that happened - nobody heard or',
+          'saw any of it. If any of it was something you would say out',
+          'loud, call arena_say with it now. If it was an action, take the',
+          'action. Do not just describe it again.'
+        ].join('\n');
+        const retry = await generateOnce(nudge, true);
+        meter(this.sheet.playerName, 'living-retry', retry);
+        const retryCalled = (retry as { toolCalls?: ToolCall[] }).toolCalls ?? [];
+        if (retryCalled.length > 0) {
+          called = retryCalled;
+          thought = String((retry as { text?: string }).text ?? '').trim();
         }
-      ).toolCalls ?? [];
-      const names = called.map((call) => call?.payload?.toolName ?? call?.name ?? call?.toolName ?? 'tool').join(', ');
-      const thought = String((response as { text?: string }).text ?? '').trim();
+      }
+      const names = called.map(toolNameOf).join(', ');
       log(`turn: ${called.length} action(s)${names ? ` (${names})` : ''}`);
       if (thought) {
         log('thought:', thought.slice(0, 160));
@@ -1136,10 +1183,8 @@ export class Npc {
         // and was built entirely on the latter. See the toolCalls shape
         // note above: the message text lives at payload.args.message.
         const said = called
-          .filter((call) => (call?.payload?.toolName ?? call?.name ?? call?.toolName) === 'arena_say')
-          .map((call) =>
-            String((call?.payload as { args?: { message?: string } } | undefined)?.args?.message ?? '').trim()
-          )
+          .filter((call) => toolNameOf(call) === 'arena_say')
+          .map((call) => String(call?.payload?.args?.message ?? '').trim())
           .filter(Boolean);
         const parts = [
           ...said.map((line) => `[said] ${line}`),
@@ -1184,10 +1229,11 @@ export class Npc {
       const filed = await this.attemptDigest(raw);
       if (filed) {
         const episode = nextEpisode(MEMORY_DIR, this.sheet.id);
-        log(`digest: episode ${episode} - ${filed.title} - ${filed.synopsis}`);
+        log(`digest: episode ${episode} - ${filed.title} - ${filed.synopsis} - (${filed.innerThoughts})`);
         const delivered = await postToDiscord(
           webhookUrl,
           `**${this.sheet.playerName} — Episode ${episode}: ${filed.title}**\n${filed.synopsis}`
+            + `\n*Inner Thoughts: ${filed.innerThoughts}*`
         );
         // Only spend the episode number on a post that actually landed.
         // Discord refusing or timing out is not the same as nothing worth
@@ -1217,7 +1263,9 @@ export class Npc {
   }
 
   /** One try at filing an episode from the raw record. Null on any failure - see the callers of looksEnglish(). */
-  private async attemptDigest(raw: string[]): Promise<{ title: string; synopsis: string } | null> {
+  private async attemptDigest(
+    raw: string[]
+  ): Promise<{ title: string; synopsis: string; innerThoughts: string } | null> {
     try {
       const prompt = [
         `Below is a raw record of what ${this.sheet.playerName} has said and`,
@@ -1231,16 +1279,19 @@ export class Npc {
         '',
         `File this as one episode about ${this.sheet.playerName}, for somebody`,
         'glancing at a dashboard who was not there and cannot see the lines',
-        'above. Favor [said] lines over [thought] lines when the two would',
-        'lead somewhere different - what he did is the story, what he was',
-        'thinking is only ever the footnote. Nothing claimed that is not',
-        'actually shown in them. Keep the synopsis short - two sentences at',
-        'the very most, the one thing worth knowing, not a recap of every',
-        'line above. Write both fields in English, regardless of what',
-        'language anything above is in.',
+        'above. Two separate things are wanted, and they are not the same',
+        'thing said twice: a synopsis built from [said] lines - what he did,',
+        'what anybody standing there could have witnessed - and a short,',
+        'fragmented run of inner thoughts built from [thought] lines -',
+        'themes, not sentences, the private undercurrent nobody there could',
+        'have seen. Nothing claimed that is not actually shown in the lines',
+        'above. Keep the synopsis to two sentences at the very most, and the',
+        'inner thoughts to a handful of fragments, not a paragraph. Write',
+        'both fields in English, regardless of what language anything above',
+        'is in.',
         '',
         'Reply with JSON and nothing else:',
-        '{"title": "...", "synopsis": "..."}'
+        '{"title": "...", "synopsis": "...", "innerThoughts": "..."}'
       ].join('\n');
       const response = await this.agent.generate('[filing an episode for the last few minutes]', {
         memory: { ...this.memory, options: { readOnly: true } },
@@ -1265,14 +1316,23 @@ export class Npc {
       const text = String((response as { text?: string }).text ?? '');
       const json = text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1);
       const parsed = json ? DigestSchema.safeParse(safeJson(json)) : null;
-      if (parsed?.success && looksEnglish(parsed.data.title) && looksEnglish(parsed.data.synopsis)) {
-        return { title: parsed.data.title, synopsis: clipSynopsis(parsed.data.synopsis.trim()) };
+      if (
+        parsed?.success
+        && looksEnglish(parsed.data.title)
+        && looksEnglish(parsed.data.synopsis)
+        && looksEnglish(parsed.data.innerThoughts)
+      ) {
+        return {
+          title: parsed.data.title,
+          synopsis: clipText(parsed.data.synopsis.trim(), SYNOPSIS_CHAR_LIMIT),
+          innerThoughts: clipText(parsed.data.innerThoughts.trim(), INNER_THOUGHTS_CHAR_LIMIT)
+        };
       }
       if (parsed?.success) {
         // Well-formed JSON, asked for in English, answered in another
         // script anyway - the instruction asking nicely is not the actual
-        // guarantee here, the same lesson clipSynopsis() already learned
-        // about "two sentences at the very most".
+        // guarantee here, the same lesson clipText() already learned about
+        // "two sentences at the very most".
         log('digest: model answered in the wrong language:', parsed.data.title);
       } else {
         // Distinct from "nothing happened" (raw.length === 0 in the caller,
