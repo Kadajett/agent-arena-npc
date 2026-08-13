@@ -88,7 +88,11 @@ export default function (pi: ExtensionAPI) {
   const profile = parseProfile(profileText);
   const bans = profile.ban.map((b) => new RegExp(b, "i"));
   const model = (process.env.NPC_VOICE_MODEL || "qwen/qwen3.7-flash").replace(/^openrouter\//, "");
+  // The extractor needs better instruction-following than the cheapest tier;
+  // it also serves as the render fallback when the primary is rate-limited.
+  const extractModel = (process.env.NPC_VOICE_EXTRACT_MODEL || "deepseek/deepseek-v4-flash-0731").replace(/^openrouter\//, "");
   const speechTools = new RegExp(process.env.NPC_SPEECH_TOOLS || "arena_say|arena_talk_to", "i");
+  const twoStage = !/^(0|false|off)$/i.test(process.env.NPC_VOICE_TWO_STAGE ?? "");
 
   const dir = process.env.NPC_MEMORY_DIR || "./var";
   fs.mkdirSync(dir, { recursive: true });
@@ -114,7 +118,7 @@ export default function (pi: ExtensionAPI) {
       ? "\nNever produce lines like these (negative examples):\n" + profile.avoid.map((e) => `- ${e}`).join("\n")
       : "");
 
-  async function smallModel(payload: string): Promise<string | null> {
+  async function smallModel(useModel: string, system: string, user: string): Promise<string | null> {
     try {
       const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
         method: "POST",
@@ -123,13 +127,13 @@ export default function (pi: ExtensionAPI) {
           "content-type": "application/json",
         },
         body: JSON.stringify({
-          model,
+          model: useModel,
           // Reasoning models burn the whole budget thinking and return null
           // content; a voice re-render needs none of it.
           reasoning: { enabled: false },
           messages: [
-            { role: "system", content: voicePrefix() },
-            { role: "user", content: payload },
+            { role: "system", content: system },
+            { role: "user", content: user },
           ],
           max_tokens: 200,
           temperature: 0.4,
@@ -145,6 +149,14 @@ export default function (pi: ExtensionAPI) {
     }
   }
 
+  const EXTRACT_PROMPT =
+    "You strip one line of game dialogue down to its verifiable payload. Output exactly three bullet groups:\n" +
+    "- addressee: @Name, or none\n" +
+    "- facts: concrete, correctly attributed statements a referee could check in the game world (WHO did WHAT, items, places, prices, numbers, proposed actions). " +
+    "A sentence about abstract nouns (stories, truth, steel, memory, debts, fate) that names no specific person, object, place, price, or action is an aphorism: omit it silently.\n" +
+    "- intent: question / answer / offer / threat / greeting / boast / refusal / acknowledgement\n" +
+    "Always output all three groups even when facts is empty. Never explain, never mention omitting.";
+
   async function renderVoice(payload: string): Promise<string> {
     const key = crypto.createHash("sha256").update(`${voiceId}:${profileVersion}:${payload}`).digest("hex");
     const hit = db.prepare(`SELECT text FROM voice_cache WHERE key = ?`).get(key) as
@@ -152,8 +164,26 @@ export default function (pi: ExtensionAPI) {
       | undefined;
     if (hit) { stats.cacheHits++; return hit.text; }
 
+    // Stage one: intent plus facts. The agent's prose never reaches the
+    // voice model, so the room's register cannot ride through on it.
+    let source = payload;
+    if (twoStage) {
+      const facts =
+        (await smallModel(extractModel, EXTRACT_PROMPT, payload)) ??
+        (await smallModel(model, EXTRACT_PROMPT, payload));
+      if (facts) source = facts;
+    }
+
+    const renderSystem =
+      voicePrefix() +
+      (twoStage
+        ? "\nYou receive addressee, facts, and intent as bullets. Write ONE spoken line delivering exactly that. " +
+          "If facts is empty, give the addressee a brief in-voice acknowledgement. Never mention bullets, facts, or instructions."
+        : "");
     for (let i = 0; i < 2; i++) {
-      const out = await smallModel(payload); // no transcript, payload only
+      const out =
+        (await smallModel(model, renderSystem, source)) ??
+        (await smallModel(extractModel, renderSystem, source));
       if (!out) break;
       const v = check(out, profile, bans);
       if (!v.length) {
