@@ -18,5 +18,8 @@ ban:
   - "waits? for (its|the)"
   - "what do you (read|hear) in"
   - "that('s| is) not an? \\w+, that('s| is)"
+  # Personification: an inanimate thing doing agent verbs is riddle-speak.
+  - "\\bthe (field|grass|wood|stage|road|door|fire|wall|stone) (holds|keeps|waits|remembers|judges|scores|answers|watches|knows)"
+  - "\\bthe (field|grass|wood|stage|road|door|fire|wall|stone) (has|have|had|will|shall)\\b"
 max_sentences: 6
 max_words: 18

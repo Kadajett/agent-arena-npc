@@ -98,7 +98,8 @@ export default function (pi: ExtensionAPI) {
 
   const voicePrefix = () =>
     "You rewrite one line of game dialogue into a specific character voice. " +
-    "Output ONLY the rewritten line, no quotes, no commentary. Keep every name, number, @mention, and fact from the payload exactly; change only the wording. " +
+    "Output ONLY the rewritten line, no quotes, no commentary. Keep every name, number, @mention, and concrete fact from the payload exactly. " +
+    "If the payload contains metaphor, riddles, or omen-talk, TRANSLATE it into plain literal statements in the voice; never preserve the metaphor itself. " +
     `Hard limits: at most ${profile.max_sentences} sentences, at most ${profile.max_words} words per sentence. Plain literal speech: no archaisms, no omens, no riddles, no metaphor.\n` +
     "The voice, by example:\n" + profile.exemplars.map((e) => `- ${e}`).join("\n");
 
