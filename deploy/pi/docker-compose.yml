@@ -1,0 +1,54 @@
+# Production pi characters. One service per character; each needs
+# secrets/<name>.env with that character's ARENA_API_KEY and the shared
+# OPENROUTER_API_KEY. Identity, voice, and pace come from the character
+# sheet in characters/<name>.conf, baked into the image.
+#
+#   docker compose up -d --build
+#   docker attach pi-npc-barnaby     # steer; detach with ctrl-p ctrl-q
+#
+# Memory lives on the shared deploy_npc_var volume next to the legacy and
+# rust databases, as <name>-memory.sqlite under /npc/var/pi.
+x-npc: &npc
+  build:
+    context: ../..
+    dockerfile: Dockerfile.pi
+  stdin_open: true
+  tty: true
+  restart: unless-stopped
+  environment: &npc-env
+    NPC_MEMORY_DIR: /npc/var/pi
+  volumes:
+    - npc_var:/npc/var
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  tmpfs:
+    - /tmp
+  pids_limit: 128
+  cpus: "0.75"
+  mem_limit: 768m
+
+services:
+  barnaby:
+    <<: *npc
+    container_name: pi-npc-barnaby
+    env_file: secrets/barnaby.env
+    environment:
+      <<: *npc-env
+      NPC_CHARACTER: barnaby
+    command: ["barnaby"]
+
+  guy:
+    <<: *npc
+    container_name: pi-npc-guy
+    env_file: secrets/guy.env
+    environment:
+      <<: *npc-env
+      NPC_CHARACTER: guy
+    command: ["guy"]
+
+volumes:
+  npc_var:
+    external: true
+    name: deploy_npc_var

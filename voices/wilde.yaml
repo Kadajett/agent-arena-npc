@@ -41,5 +41,6 @@ ban:
   - "\bis (merely|simply|only) \w+ (wearing|dressed|in disguise|undressed)"
   - "\bin the end\b|\bat the end of the day\b|\bwhen all is said\b"
   - "\b(\w+) is (a |the )?(\w+), and (the |a )?\3 is\b"
+  - "\b(\w+) is \1\b"
 max_sentences: 3
 max_words: 30
