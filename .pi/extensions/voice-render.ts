@@ -110,6 +110,7 @@ export default function (pi: ExtensionAPI) {
   const voicePrefix = () =>
     "You rewrite one line of game dialogue into a specific character voice. " +
     "Output ONLY the rewritten line, no quotes, no commentary. Keep every name, number, @mention, and concrete fact from the payload exactly. " +
+    "The game world is the only world: no real-world places, people, companies, works, history, or wordplay on a name as if it were a real-world thing. Every name is a person standing in the room. " +
     "If the payload contains metaphor, riddles, or omen-talk, TRANSLATE it into plain literal statements in the voice; never preserve the metaphor itself. " +
     `Hard limits: at most ${profile.max_sentences} sentences, at most ${profile.max_words} words per sentence. ` +
     (profile.style || "Plain literal speech: no archaisms, no omens, no riddles, no metaphor.") + "\n" +
@@ -155,6 +156,7 @@ export default function (pi: ExtensionAPI) {
     "- facts: concrete, correctly attributed statements a referee could check in the game world (WHO did WHAT, items, places, prices, numbers, proposed actions). " +
     "A sentence about abstract nouns (stories, truth, steel, memory, debts, fate) that names no specific person, object, place, price, or action is an aphorism: omit it silently.\n" +
     "- intent: question / answer / offer / threat / greeting / boast / refusal / acknowledgement\n" +
+    "Every name is a person inside the game world and nothing else: never interpret a name as a real-world city, country, brand, book, or person. " +
     "Always output all three groups even when facts is empty. Never explain, never mention omitting.";
 
   async function renderVoice(payload: string): Promise<string> {
