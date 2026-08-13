@@ -61,6 +61,7 @@ import { withFallback } from './models.js';
 import { skillsFor } from './skills.js';
 import { learnPrices, meter, note } from './spend.js';
 import { markEpisodeUsed, nextEpisode, postToDiscord } from './discord.js';
+import { noteClaim } from './ledger.js';
 import { z } from 'zod';
 import {
   describeLocalKnowledge,
@@ -127,13 +128,13 @@ const RECENT_LINES = 8;
  * How often a character posts a plain-language digest of itself to Discord,
  * for whoever set DISCORD_WEBHOOK_URL - checked once a tick rather than run
  * on its own timer, so it never overlaps the character's own turn and never
- * needs a second connection to anything. Five minutes and not the pace a
+ * needs a second connection to anything. Once a day and not the pace a
  * character's own sheet sets, because a carouser ticking every twelve
  * seconds and a guard ticking every ninety should still report on the same
- * clock; nobody watching a dashboard wants Bolo's version of five minutes
- * to be six times as talkative as Doran's.
+ * clock; nobody watching a dashboard wants Bolo's version of a day to be
+ * six times as talkative as Doran's.
  */
-const DIGEST_INTERVAL_MS = 5 * 60 * 1000;
+const DIGEST_INTERVAL_MS = 24 * 60 * 60 * 1000;
 /**
  * Attempts allowed within one digest cycle before giving up on it entirely.
  * The language guard was catching roughly half of all attempts and simply
@@ -655,6 +656,13 @@ export class Npc {
       for (const line of heard) {
         this.record(line.from, line.message);
         this.heardHere(scene, line.from, line.message);
+        noteClaim(MEMORY_DIR, this.sheet.id, {
+          claim: line.message,
+          direction: 'heard',
+          speaker: 'someone' === line.from ? null : line.from,
+          room: scene,
+          at: new Date().toISOString()
+        });
       }
       const situation: Situation = {
         scene,
@@ -1173,19 +1181,28 @@ export class Npc {
         log('thought:', thought.slice(0, 160));
       }
       note(this.sheet.playerName, 'did', `turn: ${names || 'nothing but thinking'}`);
+      // What was actually said out loud, not what was thought about saying -
+      // see the toolCalls shape note above: the message text lives at
+      // payload.args.message. Computed unconditionally: the claim ledger
+      // wants it whether or not Discord is configured at all.
+      const said = called
+        .filter((call) => toolNameOf(call) === 'arena_say')
+        .map((call) => String(call?.payload?.args?.message ?? '').trim())
+        .filter(Boolean);
+      for (const line of said) {
+        noteClaim(MEMORY_DIR, this.sheet.id, {
+          claim: line,
+          direction: 'said',
+          speaker: this.sheet.playerName,
+          room: situation.scene,
+          at: new Date().toISOString()
+        });
+      }
       // Only worth keeping if something is actually going to read it.
       // maybeDigest() only clears this when DISCORD_WEBHOOK_URL is set, so
       // buffering unconditionally left it growing for the life of the
       // process on any deployment that never turns the feature on at all.
       if (process.env.DISCORD_WEBHOOK_URL) {
-        // What was actually said out loud, not what was thought about
-        // saying - the digest used to have no way to tell the two apart
-        // and was built entirely on the latter. See the toolCalls shape
-        // note above: the message text lives at payload.args.message.
-        const said = called
-          .filter((call) => toolNameOf(call) === 'arena_say')
-          .map((call) => String(call?.payload?.args?.message ?? '').trim())
-          .filter(Boolean);
         const parts = [
           ...said.map((line) => `[said] ${line}`),
           thought ? `[thought] ${thought}` : ''
@@ -1204,15 +1221,15 @@ export class Npc {
 
   /**
    * Post what this character has been up to, in plain language, to Discord -
-   * if DISCORD_WEBHOOK_URL is set and five minutes have actually passed.
-   * Read fresh from the environment rather than cached at startup, so
-   * turning the webhook on or off only ever needs a redeploy, not a code
-   * change. Silent when there is nothing to say: a quiet five minutes is
-   * not worth a line in a channel meant for what happened.
+   * if DISCORD_WEBHOOK_URL is set and a day has actually passed. Read fresh
+   * from the environment rather than cached at startup, so turning the
+   * webhook on or off only ever needs a redeploy, not a code change. Silent
+   * when there is nothing to say: a quiet day is not worth a line in a
+   * channel meant for what happened.
    *
    * The call this makes is read-only and tool-free, the same shape Plan
    * uses to think without acting - see replan() in plan.ts - because summing
-   * up the last five minutes is not itself a moment to live through.
+   * up the last day is not itself a moment to live through.
    */
   private async maybeDigest(): Promise<void> {
     const webhookUrl = process.env.DISCORD_WEBHOOK_URL;
@@ -1259,7 +1276,16 @@ export class Npc {
         log(`digest: attempt ${attempt} of ${DIGEST_MAX_ATTEMPTS} unusable, trying again`);
       }
     }
-    log(`digest: gave up after ${DIGEST_MAX_ATTEMPTS} attempts, this cycle goes unrecorded`);
+    // Same reasoning as a failed delivery, below: exhausting every attempt
+    // without ever producing something usable is not "nothing happened",
+    // it is "we could not tell what happened yet" - the record itself is
+    // still real and still worth summarizing next cycle. Missed catching
+    // this the first time: the fix for a rejected Discord post restored
+    // the content on that path only, and generation failing outright,
+    // every attempt, was a second way to reach the exact same silent loss
+    // Greptile had already flagged once.
+    this.sinceDigest.unshift(...raw);
+    log(`digest: gave up after ${DIGEST_MAX_ATTEMPTS} attempts, its content is still live for next cycle`);
   }
 
   /** One try at filing an episode from the raw record. Null on any failure - see the callers of looksEnglish(). */
@@ -1269,7 +1295,7 @@ export class Npc {
     try {
       const prompt = [
         `Below is a raw record of what ${this.sheet.playerName} has said and`,
-        'thought over the last few minutes, one line per moment. [said] lines',
+        'thought over the last day, one line per moment. [said] lines',
         'are the actual words spoken out loud, where anyone standing there',
         'could have heard them. [thought] lines are private and unheard -',
         'useful as color and motive, but never something that happened where',
@@ -1293,7 +1319,7 @@ export class Npc {
         'Reply with JSON and nothing else:',
         '{"title": "...", "synopsis": "...", "innerThoughts": "..."}'
       ].join('\n');
-      const response = await this.agent.generate('[filing an episode for the last few minutes]', {
+      const response = await this.agent.generate('[filing an episode for the last day]', {
         memory: { ...this.memory, options: { readOnly: true } },
         toolChoice: 'none',
         instructions: `${this.persona}\n\n${prompt}`,
@@ -1314,6 +1340,16 @@ export class Npc {
       });
       meter(this.sheet.playerName, 'digesting', response);
       const text = String((response as { text?: string }).text ?? '');
+      if (!text) {
+        log(
+          'DEBUG empty digest text, full response keys:',
+          JSON.stringify(Object.keys(response as object)),
+          'finishReason:',
+          (response as { finishReason?: unknown }).finishReason,
+          'raw:',
+          JSON.stringify(response).slice(0, 1500)
+        );
+      }
       const json = text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1);
       const parsed = json ? DigestSchema.safeParse(safeJson(json)) : null;
       if (

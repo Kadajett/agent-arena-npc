@@ -1,5 +1,10 @@
 # One character, sandboxed. Copy the service to run more than one: give each a
-# different NPC_CHARACTER, ARENA_API_KEY and volume.
+# different NPC_CHARACTER and volume. ARENA_API_KEY is shared on purpose - it
+# authenticates an account, not a character. arena_register_agent creates a
+# distinct game agent per unique player_name under that one account (up to
+# ARENA_MAX_AGENTS_PER_PRINCIPAL on the gateway, 25 by default), and
+# ensureRegistered() in npc.ts already looks itself up by playerName via
+# arena_list_agents, so two characters sharing a key never collide.
 services:
   npc:
     build: .
@@ -11,12 +16,12 @@ services:
       # small steps and talk in one or two sentences.
       NPC_MODEL: ${NPC_MODEL:-openrouter/deepseek/deepseek-v4-flash}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:?set OPENROUTER_API_KEY in .env}
-      # Your Agent Arena key. One per character.
+      # Your Agent Arena key. One per account - shared across characters.
       ARENA_API_KEY: ${ARENA_API_KEY:?set ARENA_API_KEY in .env}
       ARENA_MCP_URL: ${ARENA_MCP_URL:-https://mcp.yougotserved.dev/mcp}
       # The name above their head in the world. Must be unique.
       ARENA_PLAYER_NAME: ${ARENA_PLAYER_NAME:-}
-      # Optional. Set to get a five-minute plain-language digest posted to a
+      # Optional. Set to get a once-a-day plain-language digest posted to a
       # Discord channel; unset means no Discord activity at all.
       DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
     volumes:
@@ -31,5 +36,52 @@ services:
     mem_limit: 512m
     cpus: 0.5
 
+  sanejack:
+    build: .
+    restart: always
+    environment:
+      NPC_CHARACTER: sanejack
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:?set OPENROUTER_API_KEY in .env}
+      # Same account as the npc service on purpose - see the comment at the
+      # top of this file.
+      ARENA_API_KEY: ${ARENA_API_KEY:?set ARENA_API_KEY in .env}
+      ARENA_MCP_URL: ${ARENA_MCP_URL:-https://mcp.yougotserved.dev/mcp}
+      # Left unset on purpose: sanejack.ts falls back to 'SaneJack' itself,
+      # and NPC_MODEL falls back to its own model choice the same way.
+      DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
+    volumes:
+      - sanejack_var:/npc/var
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 64
+    mem_limit: 512m
+    cpus: 0.5
+
+  # A world-level claims aggregator, not a character: no game login, no
+  # ARENA_API_KEY at all. It only reads the same public feeds the spectator
+  # viewer does (chat, activity, thoughts) across every character currently
+  # in the world, ours and anybody else's, and folds what it finds into a
+  # confidence-tiered claims table. See src/worldledger.ts and
+  # src/worldledger/graph.ts for what a tier means and how it is decided.
+  worldledger:
+    build: .
+    restart: always
+    command: ["node", "dist/worldledger.js"]
+    environment:
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:?set OPENROUTER_API_KEY in .env}
+      WORLD_API_URL: ${WORLD_API_URL:-https://world.yougotserved.dev}
+      WORLDLEDGER_MODEL: ${WORLDLEDGER_MODEL:-openrouter/deepseek/deepseek-v4-flash}
+    volumes:
+      - worldledger_var:/npc/var
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 64
+    mem_limit: 512m
+    cpus: 0.5
+
 volumes:
   npc_var:
+  sanejack_var:
+  worldledger_var:
