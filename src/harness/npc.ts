@@ -147,6 +147,14 @@ const DIGEST_INTERVAL_MS = 24 * 60 * 60 * 1000;
  */
 const DIGEST_MAX_ATTEMPTS = 2;
 /**
+ * Ceiling on the raw buffer a digest is built from. A single healthy day is
+ * nowhere near this - it exists for the day that never has one: generation
+ * or delivery failing restores the whole buffer for the next attempt, and
+ * every turn between attempts keeps appending, so a sustained outage grows
+ * it without bound otherwise. See the trim at every mutation site.
+ */
+const MAX_SINCE_DIGEST = 2000;
+/**
  * The reply itself is short - one or two sentences - but the budget cannot
  * be cut down to match it. Confirmed against Bolo directly: a 200-token cap
  * came back with 200 tokens spent and no text at all, because a reasoning
@@ -1208,6 +1216,18 @@ export class Npc {
           thought ? `[thought] ${thought}` : ''
         ].filter(Boolean);
         this.sinceDigest.push(parts.length > 0 ? parts.join(' ') : `[${names || 'nothing but thinking'}]`);
+        // A day that never manages a successful generation or delivery
+        // restores this same buffer at the top of the next cycle - see
+        // maybeDigest() below - and every turn in between keeps appending.
+        // Without a ceiling, a sustained outage grows this without bound:
+        // more memory every cycle, and eventually a prompt too large for
+        // the model to answer at all, which is itself unrecoverable.
+        // Trimming from the front loses the oldest part of the outage
+        // first, which is the right end to lose - the digest is a summary,
+        // not an audit log.
+        if (this.sinceDigest.length > MAX_SINCE_DIGEST) {
+          this.sinceDigest.splice(0, this.sinceDigest.length - MAX_SINCE_DIGEST);
+        }
       }
       // The notes were delivered with the situation this turn was given; a
       // correction that has been seen once should not nag forever.
@@ -1268,6 +1288,11 @@ export class Npc {
           // picks up where this one actually left off instead of where it
           // happened to fail.
           this.sinceDigest.unshift(...raw);
+          // Trim from the front, same as the push site: keep the most
+          // recent part of the outage, not the oldest.
+          if (this.sinceDigest.length > MAX_SINCE_DIGEST) {
+            this.sinceDigest.splice(0, this.sinceDigest.length - MAX_SINCE_DIGEST);
+          }
           log(`digest: episode ${episode} was not delivered, its number and its content are both still live`);
         }
         return;
@@ -1285,6 +1310,9 @@ export class Npc {
     // every attempt, was a second way to reach the exact same silent loss
     // Greptile had already flagged once.
     this.sinceDigest.unshift(...raw);
+    if (this.sinceDigest.length > MAX_SINCE_DIGEST) {
+      this.sinceDigest.splice(0, this.sinceDigest.length - MAX_SINCE_DIGEST);
+    }
     log(`digest: gave up after ${DIGEST_MAX_ATTEMPTS} attempts, its content is still live for next cycle`);
   }
 
