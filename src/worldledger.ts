@@ -16,9 +16,11 @@ import type { ActivityCall, ChatLine, ThoughtEntry } from './worldledger/api.js'
 import { extractClaims } from './worldledger/extract.js';
 import { classifyClaim } from './worldledger/graph.js';
 import { loadClaims, loadCursor, mergeClaims, saveCursor } from './worldledger/store.js';
+import { startServer } from './worldledger/server.js';
 
 const CYCLE_MS = 4 * 60 * 60 * 1000;
 const MEMORY_DIR = process.env.NPC_MEMORY_DIR ?? '/npc/var';
+const PORT = Number(process.env.WORLDLEDGER_PORT) || 8787;
 /** Kept short on purpose - reference material for spotting a conflict, not a second transcript. */
 const MAX_ESTABLISHED_CLAIMS = 40;
 
@@ -107,7 +109,8 @@ async function runCycle(): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  log('world ledger starting, cycling every', CYCLE_MS / 3_600_000, 'hours');
+  startServer(MEMORY_DIR, PORT);
+  log('world ledger starting, cycling every', CYCLE_MS / 3_600_000, 'hours, serving on', PORT);
   for (;;) {
     try {
       await runCycle();
