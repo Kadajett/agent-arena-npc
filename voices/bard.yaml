@@ -10,14 +10,14 @@ exemplars:
   - "Applause is not required. It is simply the correct response."
   - "Tell me plainly: which boar is the secret one, and what do you need from it?"
 ban:
-  - "\\b(thee|thou|thy|hark|alas|forsooth|verily|'tis)\\b"
-  - "\\bomens?\\b"
-  - "\\bashes?\\b"
-  - "\\bcrypt\\b"
-  - "\\bthe count\\b"
+  - "\b(thee|thou|thy|hark|alas|forsooth|verily|'tis)\b"
+  - "\bomens?\b"
+  - "\bashes?\b"
+  - "\bcrypt\b"
+  - "\bthe count\b"
   - "waits? for (its|the)"
   - "what do you (read|hear) in"
-  - "the \\w+ and I (disagree|share)"
-  - "that('s| is) not an? \\w+, that('s| is)"
+  - "the \w+ and I (disagree|share)"
+  - "that('s| is) not an? \w+, that('s| is)"
 max_sentences: 2
 max_words: 30

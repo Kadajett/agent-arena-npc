@@ -28,14 +28,16 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 interface Profile {
   exemplars: string[];
   ban: string[];
+  avoid: string[];
+  style: string;
   max_sentences: number;
   max_words: number;
 }
 
 /** Minimal YAML for exactly this schema: scalars and string lists. */
 function parseProfile(text: string): Profile {
-  const p: Profile = { exemplars: [], ban: [], max_sentences: 2, max_words: 30 };
-  let current: "exemplars" | "ban" | null = null;
+  const p: Profile = { exemplars: [], ban: [], avoid: [], style: "", max_sentences: 2, max_words: 30 };
+  let current: "exemplars" | "ban" | "avoid" | null = null;
   for (const raw of text.split("\n")) {
     const line = raw.replace(/#.*$/, (m, off) => (raw.slice(0, off).includes('"') ? m : "")).trimEnd();
     if (!line.trim()) continue;
@@ -50,7 +52,12 @@ function parseProfile(text: string): Profile {
     const kv = /^(\w+):\s*(.*)$/.exec(line);
     if (!kv) continue;
     const [, key, value] = kv;
-    if (key === "exemplars" || key === "ban") current = key;
+    if (key === "exemplars" || key === "ban" || key === "avoid") current = key;
+    else if (key === "style") {
+      let v = value.trim();
+      if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) v = v.slice(1, -1);
+      p.style = v; current = null;
+    }
     else if (key === "max_sentences") { p.max_sentences = Number(value) || 2; current = null; }
     else if (key === "max_words") { p.max_words = Number(value) || 30; current = null; }
   }
@@ -100,8 +107,12 @@ export default function (pi: ExtensionAPI) {
     "You rewrite one line of game dialogue into a specific character voice. " +
     "Output ONLY the rewritten line, no quotes, no commentary. Keep every name, number, @mention, and concrete fact from the payload exactly. " +
     "If the payload contains metaphor, riddles, or omen-talk, TRANSLATE it into plain literal statements in the voice; never preserve the metaphor itself. " +
-    `Hard limits: at most ${profile.max_sentences} sentences, at most ${profile.max_words} words per sentence. Plain literal speech: no archaisms, no omens, no riddles, no metaphor.\n` +
-    "The voice, by example:\n" + profile.exemplars.map((e) => `- ${e}`).join("\n");
+    `Hard limits: at most ${profile.max_sentences} sentences, at most ${profile.max_words} words per sentence. ` +
+    (profile.style || "Plain literal speech: no archaisms, no omens, no riddles, no metaphor.") + "\n" +
+    "The voice, by example:\n" + profile.exemplars.map((e) => `- ${e}`).join("\n") +
+    (profile.avoid.length
+      ? "\nNever produce lines like these (negative examples):\n" + profile.avoid.map((e) => `- ${e}`).join("\n")
+      : "");
 
   async function smallModel(payload: string): Promise<string | null> {
     try {
