@@ -12,7 +12,8 @@ export default function (pi: ExtensionAPI) {
   if (!agentId) return;
 
   pi.on("tool_call", async (event) => {
-    if (!/^arena_/.test(event.toolName)) return undefined;
+    // Unanchored: the MCP adapter prefixes tool names with the server name.
+    if (!/arena_/.test(event.toolName)) return undefined;
     const input = event.input as Record<string, unknown>;
     if (input && typeof input === "object" && input.agent_id === undefined) {
       input.agent_id = agentId;

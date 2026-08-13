@@ -38,8 +38,23 @@ export default function (pi: ExtensionAPI) {
     fireAt = 0;
   };
 
+  // After pi replaces the session (compaction, /new, reload), a ctx captured
+  // by a pending timer is stale and every property on it throws. The next
+  // event from the live session carries a fresh ctx and restarts the loop, so
+  // the right response to a stale ctx is to drop this tick, not to crash.
+  const safely = <T>(fn: () => T): T | undefined => {
+    try {
+      return fn();
+    } catch {
+      clearPending();
+      return undefined;
+    }
+  };
+
   const status = (ctx: ExtensionContext, text: string | undefined) => {
-    if (ctx.hasUI) ctx.ui.setStatus("auto", text);
+    safely(() => {
+      if (ctx.hasUI) ctx.ui.setStatus("auto", text);
+    });
   };
 
   const refreshStatus = (ctx: ExtensionContext) => {
@@ -62,17 +77,21 @@ export default function (pi: ExtensionAPI) {
       clearPending();
       if (!enabled) return;
       // The agent picked work back up, or a message is already queued.
-      if (!ctx.isIdle() || ctx.hasPendingMessages()) return;
+      // undefined means the ctx went stale mid-wait: drop this tick and let
+      // the live session's next event reschedule with a fresh ctx.
+      const ready = safely(() => ctx.isIdle() && !ctx.hasPendingMessages());
+      if (!ready) return;
       // The human is mid-thought in the editor: back off a cycle. But text
       // that sits unchanged for two full cycles is not a human typing, it is
       // stray keystrokes from an attach race, and it would otherwise mute
       // autonomy forever. Clear it and carry on.
-      if (ctx.hasUI) {
-        const editor = ctx.ui.getEditorText();
+      const editor = safely(() => (ctx.hasUI ? ctx.ui.getEditorText() : ""));
+      if (editor === undefined) return; // ctx went stale
+      {
         if (editor.trim().length > 0) {
           if (editor === lastEditorText && ++editorStalls >= 2) {
-            ctx.ui.setEditorText("");
-            ctx.ui.notify(`autonomy: cleared stale editor text "${editor.slice(0, 30)}"`, "info");
+            safely(() => ctx.ui.setEditorText(""));
+            safely(() => ctx.ui.notify(`autonomy: cleared stale editor text "${editor.slice(0, 30)}"`, "info"));
             editorStalls = 0;
             lastEditorText = "";
           } else {
