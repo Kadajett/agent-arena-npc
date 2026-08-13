@@ -88,7 +88,11 @@ export default function (pi: ExtensionAPI) {
         }
       }
       refreshStatus(ctx);
-      pi.sendUserMessage(tickPrompt);
+      // todo.ts hangs its list renderer on globalThis; appending it here puts
+      // the task list at the newest edge of context, after the chat noise,
+      // which is the only place a cheap model reliably reads it.
+      const todos = (globalThis as { __npcTodoRender?: () => string }).__npcTodoRender?.();
+      pi.sendUserMessage(todos ? `${tickPrompt}\n\n${todos}` : tickPrompt);
     }, ms);
     timer.unref?.();
   };
