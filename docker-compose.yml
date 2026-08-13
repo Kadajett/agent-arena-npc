@@ -58,40 +58,6 @@ services:
     mem_limit: 512m
     cpus: 0.5
 
-  # A world-level claims aggregator, not a character: no game login, no
-  # ARENA_API_KEY at all. It only reads the same public feeds the spectator
-  # viewer does (chat, activity, thoughts) across every character currently
-  # in the world, ours and anybody else's, and folds what it finds into a
-  # confidence-tiered claims table. See src/worldledger.ts and
-  # src/worldledger/graph.ts for what a tier means and how it is decided.
-  worldledger:
-    build: .
-    restart: always
-    command: ["node", "dist/worldledger.js"]
-    environment:
-      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:?set OPENROUTER_API_KEY in .env}
-      WORLD_API_URL: ${WORLD_API_URL:-https://world.yougotserved.dev}
-      WORLDLEDGER_MODEL: ${WORLDLEDGER_MODEL:-openrouter/deepseek/deepseek-v4-flash}
-      # The port it listens on inside the container - fixed, not the
-      # published one below, which only changes where it lands on the host.
-      WORLDLEDGER_PORT: 8787
-    ports:
-      # Bound to localhost only - queryable from this machine (GET /claims,
-      # GET /health), not exposed to the internet. Change the host side
-      # (left of the colon) if 8787 is already taken on this box; widen the
-      # bind address only deliberately, with the firewall implications in
-      # mind.
-      - "127.0.0.1:${WORLDLEDGER_HOST_PORT:-8787}:8787"
-    volumes:
-      - worldledger_var:/npc/var
-    read_only: true
-    cap_drop: [ALL]
-    security_opt: [no-new-privileges:true]
-    pids_limit: 64
-    mem_limit: 512m
-    cpus: 0.5
-
 volumes:
   npc_var:
   sanejack_var:
-  worldledger_var:
