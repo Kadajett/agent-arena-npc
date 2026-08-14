@@ -12,6 +12,15 @@ Run these gates in order. Do not skip ahead.
 
 **2. Two proofs and an adversarial check.** Delegate to subagents running the `diagnosing-bugs` discipline from [mattpocock/skills](https://github.com/mattpocock/skills) (`skills/engineering/diagnosing-bugs`), one agent per issue. Each returns two *independent* proofs that were measured, not reasoned: a command actually run with its real output, a DB query, a replayed payload. Reading code is the weakest form and never counts as both. Each must also try hard to **refute** the claim and name every sub-claim that did not survive. Numbers produced by estimating rather than measuring do not go in a ticket.
 
+Have each agent **write its report to a file** and reply with the path. With
+`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` and `teammateMode: "tmux"`, giving an
+agent a name makes it an interactive teammate: it prints its answer into a tmux
+pane, sends only an idle notification, and its work never returns as a tool
+result. The pane keeps about 12 lines of scrollback, so the report is then lost.
+An agent that has done excellent work is indistinguishable from one that hung.
+
+When that happens, do not verify the claim yourself. Recover the report.
+
 **3. Write it in Simplified Technical English (ASD-STE100).** One idea per sentence, active voice, present tense, no metaphor, no second word for a term already used. Format:
 
 ```
@@ -36,7 +45,13 @@ Omit `Group:` when nothing relates. Omit `Cause:` when gate 2 did not establish 
 
 ### Why the adversarial gate is not optional
 
-Issue #112 refuted its own field report ("the world caps at L18") after measurement. So did #127, whose prescribed fix (TOON encoding) measured 11% *larger* than plain compact JSON on real payloads. So did agent-arena-npc#4, which claimed compaction "never fires" when the logs hold 18 compaction records. Confident and wrong is the normal failure mode here.
+Issue #112 refuted its own field report ("the world caps at L18") after measurement.
+
+#127 is the better lesson, because it took three rounds. It first prescribed TOON encoding. A self-review then "refuted" that on a 20-payload sample, reporting TOON as 11% larger than compact JSON. A subagent measuring 742 payloads found that number inverted: TOON is 13.9% smaller by characters corpus-wide, and eligibility is 33.4%, not 17.8%. The original conclusion survived, but for a reason neither earlier pass had — TOON buys only 4.3 points over simply dropping the pretty-printer. The self-review was wrong in the same confident register as the thing it corrected.
+
+agent-arena-npc#4 claimed compaction "never fires" when the session logs hold 18 compaction records.
+
+The rule this produces: **the author of a claim does not verify it.** Delegate gate 2 and accept the result even when it contradicts you. Self-verification reliably finds the evidence that agrees.
 
 ### Repo facts worth not rediscovering
 
