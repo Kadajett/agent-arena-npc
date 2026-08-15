@@ -41,7 +41,10 @@ they may color the read, never the score.
 One table row per observer — warmth / engagement / trust / salience /
 a one-line read — every score and read backed by a quotable line, then
 the insights that do not fit a cell. Flag every judgment resting on
-fewer than five utterances as thin.
+fewer than five utterances as thin. Cells stay short; prose lives below
+the table. The salience cell shows words only, backfilled from the
+behind-back rate — never a number — and reads N/A when the sample is
+too thin to characterize.
 
 Voice rules: written for a viewer. No harness or operator internals —
 goals, prompts, model behavior — in the output. Quotes verbatim; a
