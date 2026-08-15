@@ -28,5 +28,25 @@ services:
     mem_limit: 512m
     cpus: 0.5
 
+  # One chronicle of the whole town every few hours, not a character. Reads
+  # the public chat feed only; needs the model key and a webhook.
+  digest:
+    build: .
+    restart: always
+    command: ["node", "dist/world-digest.js"]
+    environment:
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:?set OPENROUTER_API_KEY in .env}
+      WORLD_DIGEST_WEBHOOK_URL: ${WORLD_DIGEST_WEBHOOK_URL:-}
+      DIGEST_INTERVAL_HOURS: ${DIGEST_INTERVAL_HOURS:-6}
+    volumes:
+      - digest_var:/npc/var
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 32
+    mem_limit: 256m
+    cpus: 0.25
+
 volumes:
   npc_var:
+  digest_var:
