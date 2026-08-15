@@ -43,3 +43,33 @@ test('the character talking about themselves is not salience', () => {
   assert.ok(result.bySpeaker.every((s) => s.speaker !== 'Bram'));
   assert.equal(result.scanned, 6);
 });
+
+test('a mention at the window edge is judged against presence just outside it', () => {
+  // The character spoke 3 minutes before the reporting cutoff; the mention
+  // lands 5 minutes after it. Filtering the presence line away first would
+  // call this behind-their-back - the misclassification this file exists
+  // to prevent. Presence reads all lines; the cutoff drops mentions only.
+  const cutoff = Date.parse(at(10));
+  const edge = [
+    { from: 'Bram', scene: 'inn', at: at(7), message: 'Still here.' },
+    { from: 'Ada', scene: 'inn', at: at(15), message: 'Bram never misses a night.' },
+    { from: 'Ada', scene: 'inn', at: at(5), message: 'Bram is early today.' }
+  ];
+  const result = classifySalience(edge, 'Bram', 10 * 60 * 1000, cutoff);
+  assert.equal(result.mentions, 1, 'the pre-cutoff mention is dropped from the report');
+  assert.equal(result.behindBack, 0, 'but presence just before the cutoff still counts');
+  assert.equal(result.scanned, 1);
+});
+
+test('short names only match as whole words', () => {
+  const result = classifySalience(
+    [{ from: 'Cole', scene: 'inn', at: at(0), message: 'These brambles are thick.' }],
+    'Bram'
+  );
+  assert.equal(result.mentions, 0);
+});
+
+test('the output states its presence heuristic in words', () => {
+  const result = classifySalience([], 'Bram');
+  assert.match(result.presenceHeuristic, /spoke in that scene within/);
+});

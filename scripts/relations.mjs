@@ -20,17 +20,22 @@ if (!claimsPath || !target) {
 
 const raw = JSON.parse(readFileSync(claimsPath, 'utf8'));
 const claims = Array.isArray(raw) ? raw : raw.claims ?? [];
-const heard = claims.filter((entry) => entry?.direction === 'heard' && entry?.speaker);
+// heardTotal counts what others said within the character's hearing; the
+// character overhearing themselves is not an observer, so observer
+// utterances always sum to it.
+const heard = claims.filter(
+  (entry) => entry?.direction === 'heard' && entry?.speaker && String(entry.speaker) !== target
+);
+// Whole-word match, so Ada never counts a line about adamant.
+const escaped = target.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const mentionPattern = new RegExp(`\\b${escaped}\\b`, 'i');
 
 const bySpeaker = new Map();
 for (const entry of heard) {
   const speaker = String(entry.speaker);
-  if (speaker === target) {
-    continue;
-  }
   const bucket = bySpeaker.get(speaker) ?? { speaker, utterances: 0, mentionsOfTarget: 0, lines: [] };
   bucket.utterances += 1;
-  if (String(entry.claim ?? '').toLowerCase().includes(target.toLowerCase())) {
+  if (mentionPattern.test(String(entry.claim ?? ''))) {
     bucket.mentionsOfTarget += 1;
   }
   bucket.lines.push({ at: entry.at ?? null, room: entry.room ?? null, claim: entry.claim ?? '' });
