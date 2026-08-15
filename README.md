@@ -12,6 +12,77 @@ file.
 Watch them at [world.yougotserved.dev](https://world.yougotserved.dev), or read
 what they are saying at [chat.yougotserved.dev](https://chat.yougotserved.dev).
 
+## The pi takeover
+
+This branch runs characters on [pi](https://github.com/badlogic/pi-mono)
+(`@earendil-works/pi-coding-agent`) instead of the bespoke loop. pi brings the
+agent loop, sessions, and extensions; the game's MCP server brings the tools;
+the persona file is the system prompt. The model does the rest.
+
+```bash
+npm i -g @earendil-works/pi-coding-agent
+cp .env.example .env        # ARENA_API_KEY and OPENROUTER_API_KEY
+./scripts/pi-npc.sh guy     # interactive session as Guy
+./scripts/pi-npc.sh guy -p "Look around and greet whoever is there."
+```
+
+The Arena connection lives in `.pi/mcp.json` (the
+[pi-mcp-adapter](https://github.com/nicobailon/pi-mcp-adapter) extension is
+installed project-locally in `.pi/settings.json` and fetched on first run).
+Inside a session, `/mcp` shows connection status and tools, `/mcp tools` lists
+what the arena exposes, and `/mcp reconnect` recovers a dropped session.
+Pick a different model with `NPC_MODEL`, a different character by name:
+any file in `personas/` works.
+
+### A character is data
+
+`personas/<name>.md` is who they are. `personas/voice/*.md` are reusable
+registers a character speaks in (Cassian uses `peacock.md`). An optional
+`characters/<name>.conf` is the character sheet: model, thinking level, voice
+files, tick pace, watchdog thresholds, player name, agent id. Every line in a
+conf defers to the environment, so `.env` and the shell always win. Making a
+new character means a persona file, and a conf if the defaults don't suit;
+`scripts/pi-npc.sh <name>` and the container pick both up by name.
+
+Three project extensions in `.pi/extensions/` do the character-keeping:
+
+**`autonomy.ts`** makes the session a life rather than a chat. Whenever the
+agent goes idle it waits (30s by default, `NPC_TICK_SECONDS`) and hands the
+character its own next turn. Any keystroke cancels the pending tick, so a
+human typing always wins; the footer shows the countdown. `/auto` toggles it,
+`/auto 45` changes the pace, `/auto prompt <text>` changes what a tick says.
+`NPC_AUTONOMOUS=0` starts it off.
+
+**`memory.ts`** is long-term memory on Node's built-in SQLite, one file per
+character under `NPC_MEMORY_DIR`. The model gets `remember`, `recall`, and
+`forget` tools, and the strongest memories are injected into the system prompt
+before every turn, so a restarted character wakes up knowing who it has met
+instead of hoping it thinks to ask. `/memory [query]` shows what it holds.
+(Honcho was considered and is good at a harder problem; for one character in
+one container, a 150-line extension with zero dependencies beats three
+services and a Postgres volume.)
+
+**`reflexes.ts`** is self-improvement. The character writes rules for its own
+future behavior with the `standing_order` tool ("if my health drops below a
+third, break off and run"), persisted in SQLite and injected above every
+prompt as orders that outrank the conversation; it retires them with
+`drop_standing_order`, and a human edits them with `/reflex`. Underneath sit
+watchdogs: regexes run over every arena tool result (dying and low health by
+default, `NPC_WATCHDOGS` to replace), and a hit skips the autonomy timer and
+hands the character an urgent turn immediately.
+
+### Cassian in a box
+
+```bash
+cp .env.example .env        # both keys, NPC_CHARACTER=cassian
+docker compose -f docker-compose.pi.yml up -d --build
+docker attach cassian       # steer him; detach with ctrl-p ctrl-q
+```
+
+Or `./scripts/cassian-up.sh`, which waits for the keys, builds, and attaches.
+The container is `node:24-slim` plus pi and the two extensions, read-only
+root, no capabilities, with sessions and memory on the `cassian_var` volume.
+
 ## Run one
 
 You need two keys: one for a model provider, one for the game.

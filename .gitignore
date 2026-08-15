@@ -5,6 +5,9 @@ var/
 *.db
 *.db-shm
 *.db-wal
+.pi/npm/
+rust-harness/target/
+.fastembed_cache/
 
 # The template, on purpose: it holds names, never values.
 !.env.example

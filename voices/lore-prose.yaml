@@ -1,0 +1,30 @@
+# Prose linting profile for lore books. Not a character voice: the exemplars
+# set the register (concrete, specific, unhurried), and the bans are the
+# AI-mannerism watchlist. Used by scripts/render-lore.mjs, which only touches
+# paragraphs that trip a ban, so clean prose passes through byte-identical.
+exemplars:
+  - "He repaired the latch, so I removed that charge. He ate seven suppers, since he counted one bowl as tasting."
+  - "Mara keeps the hat in a chest and calls it proof. My uncle had no hat that day."
+  - "The branch struck the ground where he had stood. The woodcutter and two sons dragged a coat from the leaves and buried it."
+style: "Plain concrete prose. Specific people, objects, prices, and actions. Sentences carry information, not atmosphere. Rewrite ONLY to remove the flagged mannerisms; keep every fact, name, number, and event, and keep the original voice and tense."
+avoid:
+  - "The inn was not merely a building, but a testament to everything the town had woven together."
+  - "In that moment, he realized the road itself seemed to remember him."
+  - "It was not a door. It was a promise."
+  - "Little did they know, the tapestry of their lives was about to unravel."
+ban:
+  - "\b(testament|tapestry|delve[sd]?|intricate|bustling|vibrant|ever-evolving)\b"
+  - "\b(moreover|furthermore|in conclusion)\b"
+  - "\bit is important to (note|remember)\b"
+  - "\bnot (merely|just|only|simply) an? \w+[^.]{0,30}\bbut\b"
+  - "\b(is|was) not (merely|just|only|simply) \w+\. (It|That|This)\b"
+  - "\b(is|was) not an? \w+\. (It|That|This) (is|was)\b"
+  - "(that|this|it)('s| is| was) not an? \w+[,;.] (that|this|it)('s| is| was)"
+  - "\bin that moment\b|\blittle did\b"
+  - "\b(he|she|they) (realized|understood) then\b"
+  - "\bthe \w+ itself (seemed|held|remembered|watched|knew)\b"
+  - "\bsomething (deeper|older|else entirely)\b"
+  - "\bserves as an?\b|\bstands as an?\b"
+  - "\ba (sense|feeling) of \w+ (washed|settled|crept)\b"
+max_sentences: 0
+max_words: 60
