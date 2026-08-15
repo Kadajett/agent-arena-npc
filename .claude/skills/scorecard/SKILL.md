@@ -32,9 +32,9 @@ they may color the read, never the score.
   Show the utterance count beside the score.
 - **Trust** — judged from unprompted sharing only: volunteering
   information, plans, or feelings. Being told things is the signal.
-- **Salience** — behind-their-back mentions; pending the public
-  chat-feed walk (spec AC5). Until then report `mentionsOfTarget` and
-  label it in-presence.
+- **Salience** — behind-their-back mentions over a rolling three-day
+  window: `node scripts/salience.mjs <Name>`. The output states its
+  presence heuristic; repeat it in the report.
 
 ## 3. Report
 
