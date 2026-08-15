@@ -4,47 +4,34 @@
  * Spec: docs/world-digest.md. A standalone entrypoint (CMD override in
  * docker-compose), not a character: it reads the public chat feed, asks a
  * model to write the town's last window in-world, and posts one message.
- * The per-character self-digest in harness/discord.ts stays available but
- * off; this replaces it as the thing people actually read.
+ *
+ * Delivery is at-most-once by choice: the state file records the attempt
+ * before the webhook call and the completion after it, both written
+ * atomically (tmp + rename). A crash between post and record makes the
+ * restart treat that window as covered rather than risk posting it twice -
+ * a lost chronicle reads as a quiet stretch; a duplicated one reads as a
+ * malfunction, in public.
  */
 
-import { readFileSync, writeFileSync } from 'node:fs';
-
-/** Discord's own ceiling on one message; longer is rejected outright. */
-const DISCORD_MESSAGE_LIMIT = 2000;
-
-/**
- * Send one message to a Discord incoming webhook. Never throws; returns
- * whether it landed, so a rejected or timed-out post is not read as done.
- */
-async function postToDiscord(webhookUrl: string, content: string): Promise<boolean> {
-  try {
-    const response = await fetch(webhookUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content: content.slice(0, DISCORD_MESSAGE_LIMIT) }),
-      signal: AbortSignal.timeout(10_000)
-    });
-    if (!response.ok) {
-      log('discord post refused:', response.status, await response.text().catch(() => ''));
-      return false;
-    }
-    return true;
-  } catch (error) {
-    log('discord post failed:', (error as Error)?.message ?? error);
-    return false;
-  }
-}
+import { readFileSync, writeFileSync, renameSync } from 'node:fs';
 
 const FEED = process.env.CHAT_FEED_URL ?? 'https://chat.yougotserved.dev';
 const WEBHOOK = process.env.WORLD_DIGEST_WEBHOOK_URL ?? process.env.DISCORD_WEBHOOK_URL ?? '';
-const INTERVAL_MS = Number(process.env.DIGEST_INTERVAL_HOURS ?? 6) * 3600_000;
+const INTERVAL_HOURS = Number(process.env.DIGEST_INTERVAL_HOURS ?? 6);
 const MODEL = process.env.DIGEST_MODEL ?? 'openai/gpt-oss-120b';
-const CURSOR = `${process.env.NPC_MEMORY_DIR ?? '/npc/var'}/world-digest-cursor.json`;
-/** Context beyond the window, so arrivals and silences are decidable. */
+const STATE = `${process.env.NPC_MEMORY_DIR ?? '/npc/var'}/world-digest-state.json`;
+/**
+ * How far past the window the walk reaches for context. Silences are
+ * decidable from this; arrivals are not - a resident can outlast any fixed
+ * lookback - so arrivals come from the persisted speaker roster instead.
+ */
 const LOOKBACK_MS = 3 * 24 * 3600_000;
 
 type Line = { at: string; scene: string; from: string | null; message: string };
+type State = { lastPostedAt?: number; attemptedAt?: number; knownSpeakers?: string[] };
+
+/** Discord's own ceiling on one message; longer is rejected outright. */
+const DISCORD_MESSAGE_LIMIT = 2000;
 
 const VOICE = `You write a short chronicle of a small game town for the people
 who follow it from outside. Rules:
@@ -59,18 +46,23 @@ who follow it from outside. Rules:
 
 /**
  * Everything the writer needs, computed mechanically. Exported for the test.
- * Arrivals: first line ever (within lookback) falls inside the window.
- * Quiet: spoke before the window, not within it.
+ * Arrivals: spoke in the window and absent from the persisted roster of
+ * every name ever seen - never inferred from bounded history, which would
+ * call a returning resident new. Quiet: spoke before the window, not in it.
  */
-export function buildBriefing(lines: Line[], sinceMs: number, nowMs: number) {
-  const speakers = new Map<string, { first: number; last: number; inWindow: number }>();
+export function buildBriefing(
+  lines: Line[],
+  sinceMs: number,
+  nowMs: number,
+  knownSpeakers: ReadonlySet<string> = new Set()
+) {
+  const speakers = new Map<string, { last: number; inWindow: number }>();
   for (const line of lines) {
     if (!line.from) {
       continue;
     }
     const at = Date.parse(line.at);
-    const entry = speakers.get(line.from) ?? { first: at, last: at, inWindow: 0 };
-    entry.first = Math.min(entry.first, at);
+    const entry = speakers.get(line.from) ?? { last: at, inWindow: 0 };
     entry.last = Math.max(entry.last, at);
     if (at >= sinceMs && at <= nowMs) {
       entry.inWindow += 1;
@@ -82,7 +74,7 @@ export function buildBriefing(lines: Line[], sinceMs: number, nowMs: number) {
     windowHours: Math.round((nowMs - sinceMs) / 3600_000),
     spoke: active.map(([name, s]) => ({ name, lines: s.inWindow }))
       .sort((a, b) => b.lines - a.lines),
-    arrivals: active.filter(([, s]) => s.first >= sinceMs).map(([name]) => name),
+    arrivals: active.filter(([name]) => !knownSpeakers.has(name)).map(([name]) => name),
     quiet: [...speakers.entries()]
       .filter(([, s]) => s.inWindow === 0 && s.last < sinceMs)
       .map(([name, s]) => ({ name, silentHours: Math.round((nowMs - s.last) / 3600_000) }))
@@ -159,12 +151,42 @@ async function write(briefing: ReturnType<typeof buildBriefing>): Promise<string
   return text;
 }
 
-function readCursor(): number | null {
+/**
+ * Send one message to a Discord incoming webhook. Never throws; returns
+ * whether it landed, so a rejected or timed-out post is not read as done.
+ */
+async function postToDiscord(webhookUrl: string, content: string): Promise<boolean> {
   try {
-    return Number(JSON.parse(readFileSync(CURSOR, 'utf8')).lastPostedAt) || null;
-  } catch {
-    return null;
+    const response = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: content.slice(0, DISCORD_MESSAGE_LIMIT) }),
+      signal: AbortSignal.timeout(10_000)
+    });
+    if (!response.ok) {
+      log('discord post refused:', response.status, await response.text().catch(() => ''));
+      return false;
+    }
+    return true;
+  } catch (error) {
+    log('discord post failed:', (error as Error)?.message ?? error);
+    return false;
   }
+}
+
+function readState(): State {
+  try {
+    const state = JSON.parse(readFileSync(STATE, 'utf8')) as State;
+    return state && typeof state === 'object' ? state : {};
+  } catch {
+    return {};
+  }
+}
+
+/** Atomic: a crash mid-write leaves the old state, never a torn file. */
+function writeState(state: State): void {
+  writeFileSync(`${STATE}.tmp`, JSON.stringify(state));
+  renameSync(`${STATE}.tmp`, STATE);
 }
 
 function log(...parts: unknown[]): void {
@@ -176,24 +198,56 @@ async function runForever(): Promise<void> {
     console.error('Set WORLD_DIGEST_WEBHOOK_URL (or DISCORD_WEBHOOK_URL).');
     process.exit(1);
   }
+  if (!Number.isFinite(INTERVAL_HOURS) || INTERVAL_HOURS <= 0) {
+    console.error(
+      `DIGEST_INTERVAL_HOURS must be a positive number, not "${process.env.DIGEST_INTERVAL_HOURS}".`
+    );
+    process.exit(1);
+  }
+  const intervalMs = INTERVAL_HOURS * 3600_000;
   for (;;) {
+    const state = readState();
+    // An attempt with no completion means the process died between the
+    // webhook call and the record. The window may have posted; treat it as
+    // covered (at-most-once - see the file header).
+    if (state.attemptedAt && state.attemptedAt > (state.lastPostedAt ?? 0)) {
+      log('recovering: an attempted window is treated as posted');
+      writeState({ ...state, lastPostedAt: state.attemptedAt, attemptedAt: undefined });
+      continue;
+    }
     const now = Date.now();
-    const since = readCursor() ?? now - INTERVAL_MS;
-    if (now - since >= INTERVAL_MS) {
+    const since = state.lastPostedAt ?? now - intervalMs;
+    if (now - since >= intervalMs) {
       try {
-        const lines = await walkFeed(now - LOOKBACK_MS);
-        const briefing = buildBriefing(lines, since, now);
+        // Reach back to the cursor even when failures left it further back
+        // than the usual lookback: a late chronicle that covers its whole
+        // window beats a punctual one with a hole in it.
+        const lines = await walkFeed(Math.min(since, now - LOOKBACK_MS));
+        const known = new Set(state.knownSpeakers ?? []);
+        const briefing = buildBriefing(lines, since, now, known);
+        for (const line of lines) {
+          if (line.from) {
+            known.add(line.from);
+          }
+        }
         if (briefing.spoke.length === 0) {
           log('nobody spoke; skipping this window');
         } else {
           const chronicle = await write(briefing);
+          writeState({ ...state, attemptedAt: now, knownSpeakers: [...known] });
           const landed = await postToDiscord(WEBHOOK, chronicle);
-          log(landed ? 'chronicle posted' : 'chronicle failed to post; will retry next interval');
           if (!landed) {
+            // A known failure retries next interval; only a crash between
+            // the call and this line leaves attemptedAt to trigger the
+            // at-most-once skip. (A timed-out post that secretly landed can
+            // therefore duplicate - rare, and preferred over losing the
+            // window to every webhook hiccup.)
+            writeState({ ...state, attemptedAt: undefined, knownSpeakers: [...known] });
             throw new Error('post failed');
           }
+          log('chronicle posted');
         }
-        writeFileSync(CURSOR, JSON.stringify({ lastPostedAt: now }));
+        writeState({ lastPostedAt: now, knownSpeakers: [...known] });
       } catch (error) {
         log('digest pass failed:', (error as Error)?.message ?? error);
       }
