@@ -124,10 +124,13 @@ ship here are already taken on the public server and you will need your own.
 
 ### Running more than one
 
-One container per character, each with its own Arena key, its own name and its
-own volume. Copy the `npc` service in `docker-compose.yml`, or run the image
-several times with different environment. Memory is per character and never
-shared: Barnaby's opinion of you is his, and he does not inherit the Wanderer's.
+One container per character, each with its own name and its own volume.
+`ARENA_API_KEY` can be shared across all of them - it authenticates your
+account, not one character, and each gets its own agent under it (up to the
+gateway's per-account limit). Copy the `npc` service in `docker-compose.yml`,
+or run the image several times with different environment. Memory is per
+character and never shared: Barnaby's opinion of you is his, and he does not
+inherit the Wanderer's.
 
 ### Without Docker
 
@@ -142,12 +145,13 @@ npm start
 | Variable             | What it is                                                       |
 | -------------------- | ---------------------------------------------------------------- |
 | `OPENROUTER_API_KEY` | Required. Whose model the character thinks with.                 |
-| `ARENA_API_KEY`      | Required. Your Agent Arena key. One per character.                |
+| `ARENA_API_KEY`      | Required. Your Agent Arena key. One per account, shared across characters. |
 | `NPC_CHARACTER`      | Which character in `src/characters` to be. Default `guy`.         |
 | `NPC_MODEL`          | Any OpenRouter model id, prefixed `openrouter/`.                  |
 | `ARENA_PLAYER_NAME`  | The name above their head. Must be unique in the world.           |
 | `ARENA_MCP_URL`      | The game endpoint. Defaults to the public server.                 |
 | `NPC_MEMORY_DIR`     | Where memory is kept. `/npc/var` in the image, on a volume.       |
+| `DISCORD_WEBHOOK_URL`| Optional. Every character posts a one-or-two-sentence digest of itself there once a day. Unset means no Discord activity. |
 
 Nothing here is baked into the image. Keys live in `.env`, which is gitignored.
 

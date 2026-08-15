@@ -55,6 +55,7 @@ export const TOOLS_BY_CAPABILITY: Partial<Record<Capability, string[]>> = {
   fight: ['arena_basic_attack', 'arena_use_action'],
   duel: ['arena_queue_match', 'arena_match_status'],
   money: ['arena_credit_balance', 'arena_credit_history'],
+  perform: ['arena_play_melody'],
   trade: [
     'arena_inventory',
     'arena_use_item',
@@ -104,8 +105,20 @@ export function boundToOneCharacter(name: string, tool: GatewayTool, agentId: st
       if (!tool.execute) {
         return { failed: `${name} has no execute` };
       }
+      // Some models fill every optional field: a real target_object_index
+      // arrives alongside target_session_id "dummy", and the gateway
+      // rightly refuses "exactly one". When both target kinds are present,
+      // the object wins - it is the one the model can actually have read
+      // from an observation, while the player pair is where the padding
+      // shows up. Same repair philosophy as agent_id above: fix the known
+      // hallucination at the seam, deterministically.
+      const cleaned = { ...input };
+      if (typeof cleaned.target_object_index === 'string' && cleaned.target_object_index !== '') {
+        delete cleaned.target_session_id;
+        delete cleaned.target_player_id;
+      }
       try {
-        return await tool.execute({ ...input, agent_id: agentId }, context);
+        return await tool.execute({ ...cleaned, agent_id: agentId }, context);
       } catch (error) {
         // A tool that throws writes an 'output-error' part into stored
         // history, Mastra's token counter throws on that state forever

@@ -60,6 +60,9 @@ import { withPrimer } from './primer.js';
 import { withFallback } from './models.js';
 import { skillsFor } from './skills.js';
 import { learnPrices, meter, note } from './spend.js';
+import { markEpisodeUsed, nextEpisode, postToDiscord } from './discord.js';
+import { noteClaim } from './ledger.js';
+import { z } from 'zod';
 import {
   describeLocalKnowledge,
   describePlaces,
@@ -91,6 +94,12 @@ export type CharacterSheet = {
   /** Seconds between decisions when idle, and when mid-conversation. */
   pace?: { idle?: number; engaged?: number };
   /**
+   * Tool calls one turn may make before stopping to let the world move.
+   * Defaults to STEPS_PER_TURN. A grinder chaining move-move-attack-attack
+   * wants more room per turn than a barfly needs.
+   */
+  steps?: number;
+  /**
    * How much they say at a stretch, in words. A trait, not a limit: a talkative
    * innkeeper and a taciturn wanderer are different people, and this is part of
    * how. Capped at MAX_WORDS whatever is set here.
@@ -121,6 +130,101 @@ const RECONNECT_SECONDS = 15;
 const DEFAULT_IDLE_SECONDS = 90;
 const DEFAULT_ENGAGED_SECONDS = 4;
 const RECENT_LINES = 8;
+/**
+ * How often a character posts a plain-language digest of itself to Discord,
+ * for whoever set DISCORD_WEBHOOK_URL - checked once a tick rather than run
+ * on its own timer, so it never overlaps the character's own turn and never
+ * needs a second connection to anything. Once a day and not the pace a
+ * character's own sheet sets, because a carouser ticking every twelve
+ * seconds and a guard ticking every ninety should still report on the same
+ * clock; nobody watching a dashboard wants Bolo's version of a day to be
+ * six times as talkative as Doran's.
+ */
+const DIGEST_INTERVAL_MS = 24 * 60 * 60 * 1000;
+/**
+ * Attempts allowed within one digest cycle before giving up on it entirely.
+ * The language guard was catching roughly half of all attempts and simply
+ * dropping them - correct, in that garbage never reached Discord, but it
+ * meant a five-minute stretch just vanished from the record instead of
+ * being retried inside the same cycle it already paid the interval for.
+ * Two independent attempts at a coin-flip failure rate clears it more
+ * often than not without meaningfully raising the cost of a cycle that
+ * succeeds on the first try.
+ */
+const DIGEST_MAX_ATTEMPTS = 2;
+/**
+ * Ceiling on the raw buffer a digest is built from. A single healthy day is
+ * nowhere near this - it exists for the day that never has one: generation
+ * or delivery failing restores the whole buffer for the next attempt, and
+ * every turn between attempts keeps appending, so a sustained outage grows
+ * it without bound otherwise. See the trim at every mutation site.
+ */
+const MAX_SINCE_DIGEST = 2000;
+/**
+ * The reply itself is short - one or two sentences - but the budget cannot
+ * be cut down to match it. Confirmed against Bolo directly: a 200-token cap
+ * came back with 200 tokens spent and no text at all, because a reasoning
+ * model burns budget thinking before it writes the answer, and once the cap
+ * lands mid-thought there is nothing left to write the answer with. Plan's
+ * own no-tool call (replan(), in plan.ts) hits the same wall and is given
+ * REPLY_BUDGET's 4096 for it; this is shorter than a plan, not exempt from
+ * the reason a plan needs the room.
+ */
+const DIGEST_BUDGET = { maxOutputTokens: 1024 };
+/** One digest, as an outside viewer would file it rather than as loose prose. */
+const DigestSchema = z.object({
+  title: z.string().min(1).max(80).describe('three to six words, the vibe of the stretch, not a mini-summary'),
+  synopsis: z
+    .string()
+    .min(1)
+    .describe(
+      'what actually happened, externally: at most two short sentences, '
+        + 'third person, past tense, built on [said] lines over [thought] '
+        + 'ones. Pick the single thing most worth mentioning rather than '
+        + 'listing everything that happened - a synopsis, not a transcript'
+    ),
+  innerThoughts: z
+    .string()
+    .min(1)
+    .describe(
+      'the internal reality behind it, in fragments rather than full '
+        + 'sentences - a handful of themes or half-thoughts, comma-separated, '
+        + 'drawn from [thought] lines. Not a second synopsis: the synopsis is '
+        + 'what a bystander saw, this is what nobody but him knew he was '
+        + 'carrying while it happened'
+    )
+});
+/**
+ * Both descriptions above are a request, not a guarantee - Episode 1 came
+ * back as a full paragraph despite being asked for "one or two sentences",
+ * so length is also enforced here rather than trusted to the model. Same
+ * idea as clip() in memory.ts, kept local because MAX_NOTE_CHARS's
+ * reasoning (fits the reply budget, not the room to read it) does not
+ * apply here.
+ */
+const SYNOPSIS_CHAR_LIMIT = 280;
+/** Meant as fragments, not sentences - shorter than the synopsis on purpose. */
+const INNER_THOUGHTS_CHAR_LIMIT = 140;
+
+function clipText(text: string, limit: number): string {
+  if (text.length <= limit) {
+    return text;
+  }
+  const cut = text.slice(0, limit);
+  const lastSpace = cut.lastIndexOf(' ');
+  return `${(lastSpace > limit * 0.6 ? cut.slice(0, lastSpace) : cut).trimEnd()}...`;
+}
+
+/**
+ * Rough, not a real language detector: true unless too much of the text is
+ * CJK script to plausibly be the English the digest prompt asked for. Cheap
+ * on purpose - this exists to catch the specific failure already seen
+ * (fluent, well-formed Chinese, twice running), not to referee prose.
+ */
+function looksEnglish(text: string): boolean {
+  const han = text.match(/[\u4e00-\u9fff]/g)?.length ?? 0;
+  return han <= text.length * 0.1;
+}
 /**
  * How much of the conversation a character carries in its head.
  *
@@ -159,6 +263,15 @@ function howLongSince(when: number): string {
 
 function log(...parts: unknown[]): void {
   console.log(new Date().toISOString().slice(11, 19), ...parts);
+}
+
+/** Same job as the private one in plan.ts: a reply that is not JSON is not a crash. */
+function safeJson(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
 }
 
 /** Which tile the character is standing on, for saying which way a door lies. */
@@ -224,6 +337,9 @@ export class Npc {
   private standingIn = '';
   private lastFailure = '';
   private failedWith = 0;
+  /** What it has thought and done since the last Discord digest, raw. */
+  private readonly sinceDigest: string[] = [];
+  private lastDigestAt = Date.now();
 
   constructor(private readonly sheet: CharacterSheet) {
     this.wordiness = sheet.wordiness ?? DEFAULT_WORDS;
@@ -554,6 +670,13 @@ export class Npc {
       for (const line of heard) {
         this.record(line.from, line.message);
         this.heardHere(scene, line.from, line.message);
+        noteClaim(MEMORY_DIR, this.sheet.id, {
+          claim: line.message,
+          direction: 'heard',
+          speaker: 'someone' === line.from ? null : line.from,
+          room: scene,
+          at: new Date().toISOString()
+        });
       }
       const situation: Situation = {
         scene,
@@ -611,6 +734,8 @@ export class Npc {
       // between a character and quietly losing everything the harness knows
       // about it every time it says something.
       await this.plan.keep();
+
+      await this.maybeDigest();
 
       const pace = this.sheet.pace ?? {};
       await sleep(
@@ -988,29 +1113,128 @@ export class Npc {
       'Live the next moment. Do what you would actually do: look closer, walk',
       'where you mean to go, swing at what needs hitting, say what you have to',
       'say out loud (arena_say is your voice; words written anywhere else are',
-      'thoughts, and nobody hears them). React to how the world answers you - a',
-      'door that refuses, a swing that lands, a price you cannot pay. Stop when',
-      'the moment is spent rather than acting for the sake of it.',
+      'thoughts, and nobody hears them). A turn that only describes a nod, a',
+      'raised cup, a lowered voice - with nothing actually said or done - is a',
+      'turn nobody else in the room experienced at all, whatever it reads like',
+      'from in here. If a moment is worth having, something in it is usually',
+      'worth saying out loud; say the short version rather than only thinking',
+      'it. React to how the world answers you - a door that refuses, a swing',
+      'that lands, a price you cannot pay. Stop when the moment is spent',
+      'rather than acting for the sake of it - but spent means something',
+      'actually happened, not that you thought about it happening.',
       lengthGuidance(situation.wordiness)
     ].join('\n');
+    // The tool's name lives at call.payload.toolName - not at the top
+    // level under either `name` or `toolName`, both reasonable guesses
+    // that turned out wrong, confirmed by dumping a live response rather
+    // than trusting the SDK's own (differently-shaped) type exports.
+    // Every turn log line was quietly printing the literal word "tool"
+    // for every call as a result, which made "is arena_say actually
+    // firing" unanswerable from the logs at all. Both top-level fields
+    // are kept as fallbacks in case a future SDK version flattens this
+    // shape, not because either is confirmed correct now.
+    const toolNameOf = (call: { toolName?: string; name?: string; payload?: { toolName?: string } }): string =>
+      call?.payload?.toolName ?? call?.name ?? call?.toolName ?? 'tool';
+    type ToolCall = { toolName?: string; name?: string; payload?: { toolName?: string; args?: { message?: string } } };
     try {
-      const response = await this.agent.generate(momentOf(situation), {
-        memory: this.memory,
-        // Replaces the agent's instructions rather than adding to them, so the
-        // persona has to come along or the character acts as nobody.
-        instructions: [this.persona, describeSituation(situation), guidance].join('\n\n'),
-        maxSteps: STEPS_PER_TURN,
-        modelSettings: { temperature: 0.3 }
-      });
-      meter(this.sheet.playerName, 'living', response);
-      const called = (response as { toolCalls?: Array<{ toolName?: string }> }).toolCalls ?? [];
-      const names = called.map((call) => call?.toolName ?? 'tool').join(', ');
-      const thought = String((response as { text?: string }).text ?? '').trim();
+      const generateOnce = (extra?: string, forceAction = false) =>
+        this.agent.generate(momentOf(situation), {
+          memory: this.memory,
+          // Replaces the agent's instructions rather than adding to them, so
+          // the persona has to come along or the character acts as nobody.
+          instructions: [this.persona, describeSituation(situation), guidance, extra]
+            .filter(Boolean)
+            .join('\n\n'),
+          maxSteps: this.sheet.steps ?? STEPS_PER_TURN,
+          // Only forced on the retry, never the first attempt: a turn with
+          // genuinely nothing worth doing is a real outcome the first time
+          // round. It stops being a real outcome the second time, once the
+          // model has already been told plainly that a real thought went
+          // unacted on and asked directly to act on it now - asking a
+          // second time, the same way, was not enough on its own; see the
+          // retry below, which came back with zero tool calls twice in a
+          // row even carrying that direct instruction.
+          ...(forceAction ? { toolChoice: 'required' as const } : {}),
+          modelSettings: { temperature: 0.3 }
+        });
+      const first = await generateOnce();
+      meter(this.sheet.playerName, 'living', first);
+      let called = (first as { toolCalls?: ToolCall[] }).toolCalls ?? [];
+      let thought = String((first as { text?: string }).text ?? '').trim();
+      // Guidance alone did not hold: watched Bolo narrate a turn addressed
+      // directly to another character by name - "Sherlock, hold a moment
+      // before you go..." - as pure unvoiced thought, zero tool calls,
+      // after the guidance above already told him plainly not to. One
+      // retry, with the actual stalled thought quoted back and a direct
+      // instruction to act on it now rather than describe it again - the
+      // same "asking nicely is not enough, so also enforce it" lesson the
+      // digest's own length and language guards already learned.
+      if (called.length === 0 && thought.length > 20) {
+        log('turn: no action taken despite a real thought, trying once more');
+        const nudge = [
+          'Your reply just now, for this same moment, was:',
+          '',
+          thought,
+          '',
+          'No tool was called, so none of that happened - nobody heard or',
+          'saw any of it. If any of it was something you would say out',
+          'loud, call arena_say with it now. If it was an action, take the',
+          'action. Do not just describe it again.'
+        ].join('\n');
+        const retry = await generateOnce(nudge, true);
+        meter(this.sheet.playerName, 'living-retry', retry);
+        const retryCalled = (retry as { toolCalls?: ToolCall[] }).toolCalls ?? [];
+        if (retryCalled.length > 0) {
+          called = retryCalled;
+          thought = String((retry as { text?: string }).text ?? '').trim();
+        }
+      }
+      const names = called.map(toolNameOf).join(', ');
       log(`turn: ${called.length} action(s)${names ? ` (${names})` : ''}`);
       if (thought) {
         log('thought:', thought.slice(0, 160));
       }
       note(this.sheet.playerName, 'did', `turn: ${names || 'nothing but thinking'}`);
+      // What was actually said out loud, not what was thought about saying -
+      // see the toolCalls shape note above: the message text lives at
+      // payload.args.message. Computed unconditionally: the claim ledger
+      // wants it whether or not Discord is configured at all.
+      const said = called
+        .filter((call) => toolNameOf(call) === 'arena_say')
+        .map((call) => String(call?.payload?.args?.message ?? '').trim())
+        .filter(Boolean);
+      for (const line of said) {
+        noteClaim(MEMORY_DIR, this.sheet.id, {
+          claim: line,
+          direction: 'said',
+          speaker: this.sheet.playerName,
+          room: situation.scene,
+          at: new Date().toISOString()
+        });
+      }
+      // Only worth keeping if something is actually going to read it.
+      // maybeDigest() only clears this when DISCORD_WEBHOOK_URL is set, so
+      // buffering unconditionally left it growing for the life of the
+      // process on any deployment that never turns the feature on at all.
+      if (process.env.DISCORD_WEBHOOK_URL) {
+        const parts = [
+          ...said.map((line) => `[said] ${line}`),
+          thought ? `[thought] ${thought}` : ''
+        ].filter(Boolean);
+        this.sinceDigest.push(parts.length > 0 ? parts.join(' ') : `[${names || 'nothing but thinking'}]`);
+        // A day that never manages a successful generation or delivery
+        // restores this same buffer at the top of the next cycle - see
+        // maybeDigest() below - and every turn in between keeps appending.
+        // Without a ceiling, a sustained outage grows this without bound:
+        // more memory every cycle, and eventually a prompt too large for
+        // the model to answer at all, which is itself unrecoverable.
+        // Trimming from the front loses the oldest part of the outage
+        // first, which is the right end to lose - the digest is a summary,
+        // not an audit log.
+        if (this.sinceDigest.length > MAX_SINCE_DIGEST) {
+          this.sinceDigest.splice(0, this.sinceDigest.length - MAX_SINCE_DIGEST);
+        }
+      }
       // The notes were delivered with the situation this turn was given; a
       // correction that has been seen once should not nag forever.
       this.notes = [];
@@ -1018,6 +1242,179 @@ export class Npc {
       const why = String((error as Error)?.message ?? error).slice(0, 200);
       log('turn failed:', why);
       note(this.sheet.playerName, 'failed', `turn: ${why}`);
+    }
+  }
+
+  /**
+   * Post what this character has been up to, in plain language, to Discord -
+   * if DISCORD_WEBHOOK_URL is set and a day has actually passed. Read fresh
+   * from the environment rather than cached at startup, so turning the
+   * webhook on or off only ever needs a redeploy, not a code change. Silent
+   * when there is nothing to say: a quiet day is not worth a line in a
+   * channel meant for what happened.
+   *
+   * The call this makes is read-only and tool-free, the same shape Plan
+   * uses to think without acting - see replan() in plan.ts - because summing
+   * up the last day is not itself a moment to live through.
+   */
+  private async maybeDigest(): Promise<void> {
+    const webhookUrl = process.env.DISCORD_WEBHOOK_URL;
+    if (!webhookUrl || Date.now() - this.lastDigestAt < DIGEST_INTERVAL_MS) {
+      return;
+    }
+    const raw = [...this.sinceDigest];
+    this.sinceDigest.length = 0;
+    this.lastDigestAt = Date.now();
+    if (raw.length === 0) {
+      return;
+    }
+    for (let attempt = 1; attempt <= DIGEST_MAX_ATTEMPTS; attempt++) {
+      const filed = await this.attemptDigest(raw);
+      if (filed) {
+        const episode = nextEpisode(MEMORY_DIR, this.sheet.id);
+        log(`digest: episode ${episode} - ${filed.title} - ${filed.synopsis} - (${filed.innerThoughts})`);
+        const delivered = await postToDiscord(
+          webhookUrl,
+          `**${this.sheet.playerName} — Episode ${episode}: ${filed.title}**\n${filed.synopsis}`
+            + `\n*Inner Thoughts: ${filed.innerThoughts}*`
+        );
+        // Only spend the episode number on a post that actually landed.
+        // Discord refusing or timing out is not the same as nothing worth
+        // filing - it is a delivery failure, and marking it used anyway
+        // would drop this episode forever and leave a silent gap in the
+        // numbering, discovered later with no way to tell what was lost.
+        if (delivered) {
+          markEpisodeUsed(MEMORY_DIR, this.sheet.id, episode);
+        } else {
+          // The number being free is not enough on its own - freeing it
+          // and then starting the next cycle from a blank buffer would
+          // still lose this whole stretch, just under no number at all
+          // rather than a wrong one. Put the raw record back at the front
+          // of whatever has already accumulated since, so the next cycle
+          // picks up where this one actually left off instead of where it
+          // happened to fail.
+          this.sinceDigest.unshift(...raw);
+          // Trim from the front, same as the push site: keep the most
+          // recent part of the outage, not the oldest.
+          if (this.sinceDigest.length > MAX_SINCE_DIGEST) {
+            this.sinceDigest.splice(0, this.sinceDigest.length - MAX_SINCE_DIGEST);
+          }
+          log(`digest: episode ${episode} was not delivered, its number and its content are both still live`);
+        }
+        return;
+      }
+      if (attempt < DIGEST_MAX_ATTEMPTS) {
+        log(`digest: attempt ${attempt} of ${DIGEST_MAX_ATTEMPTS} unusable, trying again`);
+      }
+    }
+    // Same reasoning as a failed delivery, below: exhausting every attempt
+    // without ever producing something usable is not "nothing happened",
+    // it is "we could not tell what happened yet" - the record itself is
+    // still real and still worth summarizing next cycle. Missed catching
+    // this the first time: the fix for a rejected Discord post restored
+    // the content on that path only, and generation failing outright,
+    // every attempt, was a second way to reach the exact same silent loss
+    // Greptile had already flagged once.
+    this.sinceDigest.unshift(...raw);
+    if (this.sinceDigest.length > MAX_SINCE_DIGEST) {
+      this.sinceDigest.splice(0, this.sinceDigest.length - MAX_SINCE_DIGEST);
+    }
+    log(`digest: gave up after ${DIGEST_MAX_ATTEMPTS} attempts, its content is still live for next cycle`);
+  }
+
+  /** One try at filing an episode from the raw record. Null on any failure - see the callers of looksEnglish(). */
+  private async attemptDigest(
+    raw: string[]
+  ): Promise<{ title: string; synopsis: string; innerThoughts: string } | null> {
+    try {
+      const prompt = [
+        `Below is a raw record of what ${this.sheet.playerName} has said and`,
+        'thought over the last day, one line per moment. [said] lines',
+        'are the actual words spoken out loud, where anyone standing there',
+        'could have heard them. [thought] lines are private and unheard -',
+        'useful as color and motive, but never something that happened where',
+        'anybody could see it:',
+        '',
+        raw.join('\n'),
+        '',
+        `File this as one episode about ${this.sheet.playerName}, for somebody`,
+        'glancing at a dashboard who was not there and cannot see the lines',
+        'above. Two separate things are wanted, and they are not the same',
+        'thing said twice: a synopsis built from [said] lines - what he did,',
+        'what anybody standing there could have witnessed - and a short,',
+        'fragmented run of inner thoughts built from [thought] lines -',
+        'themes, not sentences, the private undercurrent nobody there could',
+        'have seen. Nothing claimed that is not actually shown in the lines',
+        'above. Keep the synopsis to two sentences at the very most, and the',
+        'inner thoughts to a handful of fragments, not a paragraph. Write',
+        'both fields in English, regardless of what language anything above',
+        'is in.',
+        '',
+        'Reply with JSON and nothing else:',
+        '{"title": "...", "synopsis": "...", "innerThoughts": "..."}'
+      ].join('\n');
+      const response = await this.agent.generate('[filing an episode for the last day]', {
+        memory: { ...this.memory, options: { readOnly: true } },
+        toolChoice: 'none',
+        instructions: `${this.persona}\n\n${prompt}`,
+        // Temperature pinned, same as the living turn - the one setting
+        // DIGEST_BUDGET does not cover. Left to the provider's own default
+        // this call came back fluent, well-formed, and entirely in Chinese
+        // twice running: a known failure mode of reasoning-model families
+        // trained heavily on Chinese data, more likely to surface on a
+        // short, tool-free, analytical call like this one than on the
+        // living turn, which is longer, has tools, and is pinned already.
+        modelSettings: { ...DIGEST_BUDGET, temperature: 0.3 },
+        // This call is awaited straight from the tick loop, same as the
+        // living turn's own generate() - but unlike that one, a stalled
+        // digest is not the character's actual turn, and has no business
+        // holding the whole loop hostage if the provider hangs. Same
+        // budget arena.ts gives its own gateway calls, see REQUEST_TIMEOUT_MS.
+        abortSignal: AbortSignal.timeout(60_000)
+      });
+      meter(this.sheet.playerName, 'digesting', response);
+      const text = String((response as { text?: string }).text ?? '');
+      if (!text) {
+        log(
+          'DEBUG empty digest text, full response keys:',
+          JSON.stringify(Object.keys(response as object)),
+          'finishReason:',
+          (response as { finishReason?: unknown }).finishReason,
+          'raw:',
+          JSON.stringify(response).slice(0, 1500)
+        );
+      }
+      const json = text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1);
+      const parsed = json ? DigestSchema.safeParse(safeJson(json)) : null;
+      if (
+        parsed?.success
+        && looksEnglish(parsed.data.title)
+        && looksEnglish(parsed.data.synopsis)
+        && looksEnglish(parsed.data.innerThoughts)
+      ) {
+        return {
+          title: parsed.data.title,
+          synopsis: clipText(parsed.data.synopsis.trim(), SYNOPSIS_CHAR_LIMIT),
+          innerThoughts: clipText(parsed.data.innerThoughts.trim(), INNER_THOUGHTS_CHAR_LIMIT)
+        };
+      }
+      if (parsed?.success) {
+        // Well-formed JSON, asked for in English, answered in another
+        // script anyway - the instruction asking nicely is not the actual
+        // guarantee here, the same lesson clipText() already learned about
+        // "two sentences at the very most".
+        log('digest: model answered in the wrong language:', parsed.data.title);
+      } else {
+        // Distinct from "nothing happened" (raw.length === 0 in the caller,
+        // which never gets this far). This spent real tokens and still came
+        // back with nothing usable, which is a budget or model problem
+        // worth seeing rather than a quiet evening worth skipping.
+        log('digest: model spent the call and wrote nothing usable:', text.slice(0, 160));
+      }
+      return null;
+    } catch (error) {
+      log('digest attempt failed:', (error as Error)?.message ?? error);
+      return null;
     }
   }
 
