@@ -18,6 +18,7 @@ import { aveline } from './characters/aveline.js';
 import { bolo } from './characters/bolo.js';
 import { sanejack } from './characters/sanejack.js';
 import { kest } from './characters/kest.js';
+import { fanshawe } from './characters/fanshawe.js';
 
 const CAST: Record<string, CharacterSheet> = {
   guy,
@@ -33,7 +34,8 @@ const CAST: Record<string, CharacterSheet> = {
   aveline,
   bolo,
   sanejack,
-  kest
+  kest,
+  fanshawe
 };
 
 const wanted = String(process.env.NPC_CHARACTER ?? 'guy').toLowerCase();

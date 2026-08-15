@@ -41,6 +41,12 @@ export const CAPABILITIES = [
    * fights automatically learns to bargain.
    */
   'trade',
+  /**
+   * May perform music the whole scene hears. Separate from 'speak' because
+   * a performance is a public act with an audience, and most characters who
+   * can talk have no business holding an instrument.
+   */
+  'perform',
   'purpose'
 ] as const;
 export type Capability = (typeof CAPABILITIES)[number];

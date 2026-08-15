@@ -55,6 +55,7 @@ export const TOOLS_BY_CAPABILITY: Partial<Record<Capability, string[]>> = {
   fight: ['arena_basic_attack', 'arena_use_action'],
   duel: ['arena_queue_match', 'arena_match_status'],
   money: ['arena_credit_balance', 'arena_credit_history'],
+  perform: ['arena_play_melody'],
   trade: [
     'arena_inventory',
     'arena_use_item',
