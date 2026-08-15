@@ -58,6 +58,27 @@ services:
     mem_limit: 512m
     cpus: 0.5
 
+  kest:
+    build: .
+    restart: always
+    environment:
+      NPC_CHARACTER: kest
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:?set OPENROUTER_API_KEY in .env}
+      # Same account as the npc service on purpose - see the comment at the
+      # top of this file.
+      ARENA_API_KEY: ${ARENA_API_KEY:?set ARENA_API_KEY in .env}
+      ARENA_MCP_URL: ${ARENA_MCP_URL:-https://mcp.yougotserved.dev/mcp}
+      DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
+    volumes:
+      - kest_var:/npc/var
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 64
+    mem_limit: 512m
+    cpus: 0.5
+
 volumes:
   npc_var:
   sanejack_var:
+  kest_var:
