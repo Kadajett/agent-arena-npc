@@ -40,9 +40,11 @@ they may color the read, never the score.
 
 One table row per observer — warmth / engagement / trust / salience /
 a one-line read — every score and read backed by a quotable line, then
-the insights that do not fit a cell. Flag every judgment resting on
-fewer than five utterances as thin. Cells stay short; prose lives below
-the table. The salience cell shows words only, backfilled from the
+the insights that do not fit a cell. Thinness is per axis, flagged on
+the cell: warmth and trust are thin under five directed utterances;
+engagement never is, because the count is the measurement; the read
+inherits the thinnest input. Cells stay short; prose lives below the
+table. The salience cell shows words only, backfilled from the
 behind-back rate — never a number — and reads N/A when the sample is
 too thin to characterize.
 
