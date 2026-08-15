@@ -8,6 +8,8 @@
  * hand a character sheet the whole surface.
  */
 
+import { decode as toonDecode } from '@toon-format/toon';
+
 const MCP_URL = process.env.ARENA_MCP_URL ?? 'https://mcp.yougotserved.dev/mcp';
 const API_KEY = process.env.ARENA_API_KEY ?? '';
 const REQUEST_TIMEOUT_MS = 60_000;
@@ -154,11 +156,33 @@ export class ArenaClient {
 
   async call(name: string, args: Record<string, unknown>): Promise<any> {
     const result = await this.rpc('tools/call', { name, arguments: args });
-    const body = JSON.parse(result.content[0].text);
+    const text = result.content[0].text;
+    const body = decodeResult(text);
     if (result.isError) {
-      throw new Error(`${name}: ${body?.error}: ${body?.message}`);
+      // A plain-text error body decodes to something with neither field
+      // (TOON is lenient), and "undefined: undefined" would discard the one
+      // clue the server sent. The raw text is the error then.
+      throw new Error(`${name}: ${body?.error ?? 'error'}: ${body?.message ?? text}`);
     }
     return body;
+  }
+}
+
+/**
+ * A tool result, whichever encoding the gateway chose for it.
+ *
+ * Since agentArena#127 the gateway ships each result as TOON whenever that is
+ * meaningfully smaller than JSON, and as JSON otherwise - per payload, with no
+ * marker saying which. Parsing JSON first and falling back keeps both working;
+ * without the fallback, one TOON-shaped reply (arena_list_agents is reliably
+ * one) wedges the reconnect loop forever, which is how Bolo spent a night
+ * retrying every fifteen seconds.
+ */
+function decodeResult(text: string): any {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return toonDecode(text);
   }
 }
 
