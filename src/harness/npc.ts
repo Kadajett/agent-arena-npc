@@ -94,6 +94,12 @@ export type CharacterSheet = {
   /** Seconds between decisions when idle, and when mid-conversation. */
   pace?: { idle?: number; engaged?: number };
   /**
+   * Tool calls one turn may make before stopping to let the world move.
+   * Defaults to STEPS_PER_TURN. A grinder chaining move-move-attack-attack
+   * wants more room per turn than a barfly needs.
+   */
+  steps?: number;
+  /**
    * How much they say at a stretch, in words. A trait, not a limit: a talkative
    * innkeeper and a taciturn wanderer are different people, and this is part of
    * how. Capped at MAX_WORDS whatever is set here.
@@ -1139,7 +1145,7 @@ export class Npc {
           instructions: [this.persona, describeSituation(situation), guidance, extra]
             .filter(Boolean)
             .join('\n\n'),
-          maxSteps: STEPS_PER_TURN,
+          maxSteps: this.sheet.steps ?? STEPS_PER_TURN,
           // Only forced on the retry, never the first attempt: a turn with
           // genuinely nothing worth doing is a real outcome the first time
           // round. It stops being a real outcome the second time, once the
