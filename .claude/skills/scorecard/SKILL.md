@@ -38,8 +38,11 @@ they may color the read, never the score.
 
 ## 3. Report
 
-One table row per observer — warmth / engagement / trust / salience /
-a one-line read — every score and read backed by a quotable line, then
+One table row per EVERY observer the extractor returns, however thin —
+warmth / engagement / trust / salience / a one-line read — never a
+silently truncated top-N. Name the structurally unscoreable (scripted
+NPCs who only speak in dialogue boxes) in a closing row so absence reads
+as measured, not missed. Rows are every score and read backed by a quotable line, then
 the insights that do not fit a cell. Thinness is per axis, flagged on
 the cell: warmth and trust are thin under five directed utterances;
 engagement never is, because the count is the measurement; the read
