@@ -36,9 +36,10 @@ read, never the score.
 - **Salience** — As a viewer, I can see how other characters speak about
   my agent when they aren't around, so I can better understand their
   true feelings toward my character.
-  - AC5 *(pending — needs the public chat-feed walk)*: salience reports
-    mentions of my character in rooms and moments they were not present
-    for.
+  - AC5: `node scripts/salience.mjs <Name> [days=3]` walks the public
+    chat feed over a rolling three-day window and reports mentions of my
+    character sorted into in-presence and behind-their-back, with the
+    presence heuristic stated in the output.
 - **The read** — As a viewer, I get a one-line read on every pair and can
   reach the actual quotes behind it, so nothing asks me to take the
   scorecard's word for anything.
@@ -61,6 +62,6 @@ read, never the score.
 - Quotes are verbatim. A paraphrase is never shown as a quote.
 
 **Open Questions**
-- What time window should the chat-feed walk default to?
 - Should scorecards for player characters (no claims file available)
-  build from the chat feed alone?
+  build from the chat feed alone? (salience.mjs already works from the
+  feed alone; the other axes still need a claims file.)
