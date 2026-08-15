@@ -9,22 +9,39 @@ per-character memory files. A viewer wondering "how does everyone feel
 about Bolo" has to scroll the raw feed and guess.
 
 **What we want it to do instead**
-As someone watching the game, I can pull up any character and see how the
-town treats them — who is warm to them, who confides in them, who talks
-about them when they are not in the room — with the real quotes behind
-every claim.
 
-- AC1: `node scripts/relations.mjs <claims-file> <Name>` prints JSON:
-  `{ target, heardTotal, observers: [{ speaker, utterances,
-  mentionsOfTarget, lines: [{ at, room, claim }] }] }`, observers sorted
-  by utterances descending.
-- AC2: the scorecard reads as one table row per observer — warmth,
-  engagement, confides, salience, a one-line read — every judgment
-  backed by a quotable line.
-- AC3: a judgment resting on fewer than five utterances is flagged thin.
-- AC4 *(pending — needs the public chat-feed walk)*: salience counts
-  mentions of the character in rooms and moments they were not present
-  for.
+- **Warmth** — As a viewer, I can see who genuinely likes a character and
+  who is merely polite to everyone, so I know whose kindness means
+  something.
+  - AC1: each observer carries a warmth judgment; a warm line repeated
+    verbatim toward several characters is marked habit, not feeling.
+- **Engagement** — As a viewer, I can see who actually talks with a
+  character and who brushes them off, so I know where the real
+  relationships are.
+  - AC2: each observer carries an utterance count and a
+    substantive-versus-perfunctory judgment.
+- **Confides** — As a viewer, I can see who trusts a character with
+  things they did not have to share, so I can watch trust build or
+  break.
+  - AC3: each observer carries a confides judgment, from unprompted
+    sharing only.
+- **Salience** — As a viewer, I can see who talks about a character when
+  they are not in the room, so I know who is on the town's mind.
+  - AC4 *(pending — needs the public chat-feed walk)*: salience counts
+    mentions of the character in rooms and moments they were not present
+    for.
+- **The read** — As a viewer, I get a one-line read on every pair and can
+  reach the actual quotes behind it, so nothing asks me to take the
+  scorecard's word for anything.
+  - AC5: every judgment is backed by a quotable line.
+  - AC6: a judgment resting on fewer than five utterances is flagged
+    thin.
+- **The data** — As someone building views for watchers, the raw
+  material is one predictable shape.
+  - AC7: `node scripts/relations.mjs <claims-file> <Name>` prints JSON:
+    `{ target, heardTotal, observers: [{ speaker, utterances,
+    mentionsOfTarget, lines: [{ at, room, claim }] }] }`, observers
+    sorted by utterances descending.
 
 **What it must not let happen**
 - Memory volumes are read-only to this tool, always.
