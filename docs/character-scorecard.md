@@ -10,35 +10,44 @@ about Bolo" has to scroll the raw feed and guess.
 
 **What we want it to do instead**
 
-- **Warmth** — As a viewer, I can see who genuinely likes a character and
-  who is merely polite to everyone, so I know whose kindness means
-  something.
-  - AC1: each observer carries a warmth judgment; a warm line repeated
-    verbatim toward several characters is marked habit, not feeling.
-- **Engagement** — As a viewer, I can see who actually talks with a
-  character and who brushes them off, so I know where the real
-  relationships are.
-  - AC2: each observer carries an utterance count and a
-    substantive-versus-perfunctory judgment.
-- **Confides** — As a viewer, I can see who trusts a character with
-  things they did not have to share, so I can watch trust build or
-  break.
-  - AC3: each observer carries a confides judgment, from unprompted
-    sharing only.
-- **Salience** — As a viewer, I can see who talks about a character when
-  they are not in the room, so I know who is on the town's mind.
-  - AC4 *(pending — needs the public chat-feed walk)*: salience counts
-    mentions of the character in rooms and moments they were not present
+Every column except the read is an axis scored 0 to 1. The score is the
+measurement; the words are chosen at invocation to fit the score. Tone
+descriptors ("playful", "gruff") are not axis values — they may color the
+read, never the score.
+
+- **Warmth** — As a viewer, I get a quick emotional temp check on how
+  each character feels toward my character: absolute zero to surface of
+  the sun.
+  - AC1: each observer carries a warmth score in [0, 1]; the component
+    backfills the fitting noun(s) from the score.
+  - AC2: a warm line repeated verbatim toward several characters is
+    habit, not feeling, and dampens the score.
+- **Engagement** — As a viewer, I can see how often each character
+  directly engages my character, so I know who seeks them out and who
+  brushes them off.
+  - AC3: each observer carries an engagement score in [0, 1] driven by
+    frequency of direct engagement, with the utterance count shown
+    beside it.
+- **Trust** — As a viewer, I can see how much each character trusts my
+  character, so I can watch trust build or break.
+  - AC4: each observer carries a trust score in [0, 1], judged from
+    unprompted sharing only; nouns and phrases backfill against the
+    score.
+- **Salience** — As a viewer, I can see how other characters speak about
+  my agent when they aren't around, so I can better understand their
+  true feelings toward my character.
+  - AC5 *(pending — needs the public chat-feed walk)*: salience reports
+    mentions of my character in rooms and moments they were not present
     for.
 - **The read** — As a viewer, I get a one-line read on every pair and can
   reach the actual quotes behind it, so nothing asks me to take the
   scorecard's word for anything.
-  - AC5: every judgment is backed by a quotable line.
-  - AC6: a judgment resting on fewer than five utterances is flagged
+  - AC6: every score and every read is backed by a quotable line.
+  - AC7: a judgment resting on fewer than five utterances is flagged
     thin.
 - **The data** — As someone building views for watchers, the raw
   material is one predictable shape.
-  - AC7: `node scripts/relations.mjs <claims-file> <Name>` prints JSON:
+  - AC8: `node scripts/relations.mjs <claims-file> <Name>` prints JSON:
     `{ target, heardTotal, observers: [{ speaker, utterances,
     mentionsOfTarget, lines: [{ at, room, claim }] }] }`, observers
     sorted by utterances descending.

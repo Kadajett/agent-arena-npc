@@ -19,26 +19,29 @@ The claims file lives in the character's memory volume
 (`<character>-claims.json`). Read it from the volume read-only; never
 write to a memory volume.
 
-## 2. Judge each observer on four stats
+## 2. Score each observer on three axes, 0 to 1
 
-- **Warmth** — tone when addressing the character: greetings, acceptance,
-  affection vs rebuffs or condescension. Note *non-differential* warmth: a
-  speaker whose warm line is verbatim identical toward several characters
-  scores as habit, not feeling.
-- **Engagement** — utterance count, and whether replies are substantive
-  or perfunctory.
-- **Confides** — volunteering information, plans, or feelings unprompted.
-  Being told things is the trust signal.
-- **Salience** — `mentionsOfTarget` while the character is not the one
-  being addressed. (Behind-their-back mentions arrive with the public
-  chat-feed walk — see the spec's AC4.)
+The score is the measurement; pick the noun(s) to fit the score at
+report time. Tone descriptors ("playful", "gruff") are not axis values —
+they may color the read, never the score.
+
+- **Warmth** — a quick emotional temp check: 0 is absolute zero, 1 is
+  surface of the sun. A warm line repeated verbatim toward several
+  characters is habit, not feeling, and dampens the score.
+- **Engagement** — frequency of direct engagement with the character.
+  Show the utterance count beside the score.
+- **Trust** — judged from unprompted sharing only: volunteering
+  information, plans, or feelings. Being told things is the signal.
+- **Salience** — behind-their-back mentions; pending the public
+  chat-feed walk (spec AC5). Until then report `mentionsOfTarget` and
+  label it in-presence.
 
 ## 3. Report
 
-One table row per observer — warmth / engagement / confides / salience /
-a one-line read — every judgment backed by a quotable line, then the
-insights that do not fit a cell. Flag every judgment resting on fewer
-than five utterances as thin.
+One table row per observer — warmth / engagement / trust / salience /
+a one-line read — every score and read backed by a quotable line, then
+the insights that do not fit a cell. Flag every judgment resting on
+fewer than five utterances as thin.
 
 Voice rules: written for a viewer. No harness or operator internals —
 goals, prompts, model behavior — in the output. Quotes verbatim; a
