@@ -34,7 +34,7 @@ export const kest: CharacterSheet = {
       + 'fighter this world offers and neither put you down - and you knew '
       + 'it, without anyone having to say so.'
   },
-  pace: { idle: 15, engaged: 8 },
+  pace: { idle: 8, engaged: 6 },
   steps: 8,
   wordiness: 14,
   remembers: true
