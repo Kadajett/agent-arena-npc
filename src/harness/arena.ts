@@ -156,9 +156,13 @@ export class ArenaClient {
 
   async call(name: string, args: Record<string, unknown>): Promise<any> {
     const result = await this.rpc('tools/call', { name, arguments: args });
-    const body = decodeResult(result.content[0].text);
+    const text = result.content[0].text;
+    const body = decodeResult(text);
     if (result.isError) {
-      throw new Error(`${name}: ${body?.error}: ${body?.message}`);
+      // A plain-text error body decodes to something with neither field
+      // (TOON is lenient), and "undefined: undefined" would discard the one
+      // clue the server sent. The raw text is the error then.
+      throw new Error(`${name}: ${body?.error ?? 'error'}: ${body?.message ?? text}`);
     }
     return body;
   }

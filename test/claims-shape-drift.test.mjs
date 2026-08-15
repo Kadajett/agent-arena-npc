@@ -14,6 +14,9 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const script = fileURLToPath(new URL('../scripts/relations.mjs', import.meta.url));
 
 const fixture = [
   { claim: 'Pull up a stool, Ada.', direction: 'said', speaker: 'Bram', room: 'town', at: 't1' },
@@ -28,11 +31,11 @@ test('a known ledger produces exactly the expected scorecard input', () => {
   const file = join(dir, 'bram-claims.json');
   writeFileSync(file, JSON.stringify(fixture));
   const output = JSON.parse(
-    execFileSync(process.execPath, ['scripts/relations.mjs', file, 'Bram'], { encoding: 'utf8' })
+    execFileSync(process.execPath, [script, file, 'Bram'], { encoding: 'utf8' })
   );
   assert.deepEqual(output, {
     target: 'Bram',
-    heardTotal: 4,
+    heardTotal: 3,
     observers: [
       {
         speaker: 'Cole',
@@ -50,5 +53,5 @@ test('a known ledger produces exactly the expected scorecard input', () => {
         lines: [{ at: 't2', room: 'town', claim: 'Bram, you remembered my name.' }]
       }
     ]
-  }, 'the target’s own lines stay out, said-direction lines stay out, and counts are exact');
+  }, 'the target’s own lines stay out of observers AND heardTotal, said-direction lines stay out, and counts are exact');
 });
