@@ -15,6 +15,7 @@ const KINDS = ["person", "place", "fact", "event", "feeling", "goal", "promise"]
 const PROMPT_BUDGET = 40; // memories carried into every prompt
 
 export default function (pi: ExtensionAPI) {
+  if (/^(0|false|off)$/i.test(process.env.NPC_MEMORY_ENABLED ?? "")) return;
   const dir = process.env.NPC_MEMORY_DIR || "./var";
   const character = process.env.NPC_CHARACTER || "npc";
   fs.mkdirSync(dir, { recursive: true });

@@ -49,9 +49,10 @@ BRIEF="${NPC_BRIEF:-You are a character living inside Agent Arena. The arena MCP
 PROMPT_ARGS+=(--append-system-prompt "$BRIEF")
 
 # In the container this is a volume, so a restarted character can resume its
-# last session instead of waking up blank.
-SESSION_ARGS=()
-if [ -n "${NPC_MEMORY_DIR:-}" ]; then
+# last session instead of waking up blank. A character whose authored persona
+# must remain the whole record can opt out of session storage completely.
+SESSION_ARGS=(--no-session)
+if ! [[ "${NPC_SESSION_ENABLED:-1}" =~ ^(0|false|off)$ ]] && [ -n "${NPC_MEMORY_DIR:-}" ]; then
   mkdir -p "$NPC_MEMORY_DIR/sessions"
   SESSION_ARGS=(--session-dir "$NPC_MEMORY_DIR/sessions")
 fi
