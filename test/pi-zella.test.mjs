@@ -37,6 +37,24 @@ test('Zella keeps authored speech and dynamic unaccompanied singing', () => {
   assert.match(persona, /Never fall back to a default scale or six-note loop/);
 });
 
+test('Zella reads live chat and leads an ordinary social life', () => {
+  const config = read('characters/zella.conf');
+  const persona = read('personas/zella.md');
+
+  assert.match(config, /NPC_TICK_SECONDS="\$\{NPC_TICK_SECONDS:-90\}"/);
+  assert.match(config, /arena_observe.*include_recent_messages.*true/);
+  assert.match(config, /arena_talk_to/);
+  assert.match(config, /arena_choose/);
+  assert.match(config, /arena_end_talk/);
+  assert.match(config, /walk/);
+  assert.match(persona, /recentChat/);
+  assert.match(persona, /senderKind\s+`player`/);
+  assert.match(persona, /arena_talk_to/);
+  assert.match(persona, /arena_choose/);
+  assert.match(persona, /arena_end_talk/);
+  assert.match(persona, /move between the inn and town/);
+});
+
 test('production declares Zella as a Pi service', () => {
   const compose = read('deploy/pi/docker-compose.yml');
   assert.match(compose, /\n  zella:\n[\s\S]*?container_name: pi-npc-zella/);
