@@ -86,7 +86,9 @@ test('Zella and Barnaby carry the verified playable quest guide', () => {
 test('Barnaby is a stateless plain-speech conversation anchor', () => {
   const config = read('characters/barnaby.conf');
   const persona = read('personas/barnaby.md');
+  const runner = read('scripts/pi-npc.sh');
 
+  assert.match(config, /NPC_MODEL="\$\{NPC_MODEL:-llmmo\/qwen3\.8-27b\}"/);
   assert.match(config, /NPC_MEMORY_ENABLED="\$\{NPC_MEMORY_ENABLED:-0\}"/);
   assert.match(config, /NPC_SESSION_ENABLED="\$\{NPC_SESSION_ENABLED:-0\}"/);
   assert.match(config, /NPC_TODO_ENABLED="\$\{NPC_TODO_ENABLED:-0\}"/);
@@ -97,6 +99,8 @@ test('Barnaby is a stateless plain-speech conversation anchor', () => {
   assert.match(persona, /Do not invent a destination, event, reward, enemy, item/);
   assert.match(persona, /Use no riddles, omens, prophecies, metaphors, aphorisms/);
   assert.doesNotMatch(persona, /existential dread/);
+  assert.match(runner, /PROVIDER="\$\{MODEL%%\/\*\}"/);
+  assert.match(runner, /exec pi --provider "\$PROVIDER"/);
 });
 
 test('production moves Zella from Pi to a persistent Codex session', () => {
@@ -107,6 +111,7 @@ test('production moves Zella from Pi to a persistent Codex session', () => {
 
   assert.doesNotMatch(compose, /\n  zella:\n/);
   assert.match(deployment, /name: zella-codex/);
+  assert.match(deployment, /image: zella-codex:0\.1\.3/);
   assert.match(deployment, /name: zella-codex-home-erebor/);
   assert.match(runner, /codex exec resume --last --all/);
   assert.match(runner, /sleep 120/);

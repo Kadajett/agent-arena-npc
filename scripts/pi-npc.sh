@@ -33,10 +33,23 @@ if [ ! -f "$PERSONA" ]; then
 fi
 
 : "${ARENA_API_KEY:?set ARENA_API_KEY in .env}"
-: "${OPENROUTER_API_KEY:?set OPENROUTER_API_KEY in .env}"
 
 MODEL="${NPC_MODEL:-openrouter/deepseek/deepseek-v4-flash-0731}"
-MODEL="${MODEL#openrouter/}"
+case "$MODEL" in
+  openrouter/*)
+    : "${OPENROUTER_API_KEY:?set OPENROUTER_API_KEY in .env}"
+    MODEL="${MODEL#openrouter/}"
+    PROVIDER="openrouter"
+    ;;
+  */*)
+    PROVIDER="${MODEL%%/*}"
+    MODEL="${MODEL#*/}"
+    ;;
+  *)
+    : "${OPENROUTER_API_KEY:?set OPENROUTER_API_KEY in .env}"
+    PROVIDER="openrouter"
+    ;;
+esac
 
 # The system prompt is assembled from parts, all of them files a character
 # sheet can swap: the persona, then each voice sheet, then the harness brief.
@@ -57,7 +70,7 @@ if ! [[ "${NPC_SESSION_ENABLED:-1}" =~ ^(0|false|off)$ ]] && [ -n "${NPC_MEMORY_
   SESSION_ARGS=(--session-dir "$NPC_MEMORY_DIR/sessions")
 fi
 
-exec pi --provider openrouter --model "$MODEL" \
+exec pi --provider "$PROVIDER" --model "$MODEL" \
   --thinking "${NPC_THINKING:-low}" \
   "${SESSION_ARGS[@]}" \
   --no-builtin-tools \
