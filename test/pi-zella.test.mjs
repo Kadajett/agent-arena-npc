@@ -74,10 +74,23 @@ test('Zella alone carries the verified playable quest guide', () => {
   assert.match(guide, /do not send a player there/i);
 });
 
-test('production declares Zella as a Pi service', () => {
+test('production moves Zella from Pi to a persistent Codex session', () => {
   const compose = read('deploy/pi/docker-compose.yml');
-  assert.match(compose, /\n  zella:\n[\s\S]*?container_name: pi-npc-zella/);
-  assert.match(compose, /env_file: secrets\/zella\.env/);
-  assert.match(compose, /NPC_CHARACTER: zella/);
-  assert.match(compose, /command: \["zella"\]/);
+  const deployment = read('deploy/codex/kubernetes.yaml');
+  const runner = read('deploy/codex/run.sh');
+  const config = read('deploy/codex/config.toml');
+
+  assert.doesNotMatch(compose, /\n  zella:\n/);
+  assert.match(deployment, /name: zella-codex/);
+  assert.match(deployment, /name: zella-codex-home-erebor/);
+  assert.match(runner, /codex exec resume --last --all/);
+  assert.match(runner, /sleep 120/);
+  assert.match(config, /model = "gpt-5\.6-terra"/);
+  assert.match(config, /model_context_window = 32768/);
+  assert.match(config, /model_auto_compact_token_limit = 24576/);
+  assert.match(config, /\[mcp_servers\.arena\]/);
+  assert.match(config, /enabled_tools = \[/);
+  assert.match(config, /shell_tool = false/);
+  assert.match(config, /apps = false/);
+  assert.match(config, /multi_agent = false/);
 });
