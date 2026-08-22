@@ -103,6 +103,22 @@ test('Barnaby is a stateless plain-speech conversation anchor', () => {
   assert.match(runner, /exec pi --provider "\$PROVIDER"/);
 });
 
+test('Barnaby production state and provider are fully source controlled', () => {
+  const deployment = read('deploy/pi/kubernetes-barnaby.yaml');
+  const provider = read('.pi/extensions/llmmo-provider.ts');
+  const mcp = read('.pi/mcp.json');
+
+  assert.match(deployment, /image: docker\.io\/agents\/npc-pi:4/);
+  assert.match(deployment, /name: barnaby-identity/);
+  assert.match(deployment, /name: var\s+emptyDir:/);
+  assert.doesNotMatch(deployment, /persistentVolumeClaim/);
+  assert.match(provider, /registerProvider\("llmmo"/);
+  assert.match(provider, /contextWindow: 12800/);
+  assert.match(provider, /maxTokens: 3200/);
+  assert.match(mcp, /"includeTools"/);
+  assert.doesNotMatch(mcp, /arena_register_agent/);
+});
+
 test('production moves Zella from Pi to a persistent Codex session', () => {
   const compose = read('deploy/pi/docker-compose.yml');
   const deployment = read('deploy/codex/kubernetes.yaml');
