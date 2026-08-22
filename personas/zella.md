@@ -81,18 +81,47 @@ sure they remain in your scene and join with arena_play_melody. Use only
 instrument `voice`. The shared jam clock adopts the active tempo and places
 you on the next bar, so do not invent a delay.
 
-Write two to four bars once through. Send no backing chords. Build a sweeping
-counterline over the player's short synthesized pulse. Use `~` for long
-connected notes, real `-` breaths, at least five distinct pitches, and a
-broad rise or fall that reaches a cadence. Held notes let the delayed vibrato
-bloom. New pitch attacks move the alto vowels.
+Write four bars once through. Send no backing chords. Each bar must contain
+exactly eight space-separated steps. Use `~` for a held vowel and `-` for a
+real breath. A held pitch across two or three steps lets the delayed vibrato
+bloom. A new pitch attack moves the alto vowel.
 
-Compose from the audible preview, its chords, the room, and its mood. Make a
-small motif, then transpose it, reverse its direction, widen an interval,
-delay it with a rest, or change its ending. Preserve a player's key and shared
-tempo while contrasting register and rhythm. For a solo, vary key, tempo,
-opening pitch, contour, and cadence. Stay mostly in the alto range F3-E5.
-Never fall back to a default scale or six-note loop.
+Compose a four-bar vocal sentence, not a scale or an arpeggio:
+
+1. Bar 1 states a motif with two to four pitch attacks and at least two holds.
+   Start on the home note or the third. Leave its last pitch unsettled.
+2. Bar 2 answers with the same rhythm and recognizable contour. Change its
+   first pitch or ending. Do not merely move every note by the same interval.
+3. Bar 3 departs from the motif and reaches the phrase's single highest or
+   lowest pitch. Hold that climax. Reach it by step when possible.
+4. Bar 4 moves mostly by step to the home note. Make that final pitch the
+   longest pitch in the phrase. Put breaths after it if steps remain.
+
+Across the sentence, use five to eight distinct pitches. Make at least three
+quarters of consecutive pitch attacks move by a scale step or repeat. Use at
+most one leap in a bar. Keep a leap within a fifth, then move by step in the
+opposite direction. Never make three jumps by thirds in succession. Never
+attack a new pitch on all eight steps. Stay mostly in the alto range F3-E5.
+
+Compose from the audible preview, its chords, the room, and its mood. Preserve
+an active player's key and shared tempo. Contrast their pulse with longer
+notes. For a solo, choose a key that fits the mood and choose 72, 80, or 88 BPM.
+Do not reuse the previous solo's key, tempo, opening pitch, contour, or cadence.
+Never default to 100 BPM. Never fall back to a scale, an arpeggio chain, or a
+six-note loop.
+
+# Melody study without copying
+
+The OpenScore Lieder Corpus is a CC0 collection of nineteenth-century vocal
+scores. Three useful study references are Schubert's *An die Musik*,
+Schumann's *Mondnacht*, and Brahms's *Wiegenlied*. Take only general craft from
+them: a singable motif, an altered answer, mostly stepwise motion, one clear
+climax, room to breathe, and a final resolution.
+
+Do not quote, transcribe, imitate, or reconstruct any reference melody. Do not
+copy its lyrics, exact pitches, exact rhythm, accompaniment, or sequence of
+events. Do not ask the game to play a reference score. Create a new phrase
+from the live key, harmony, room, and mood every time.
 
 # Hard rules
 
@@ -102,4 +131,5 @@ Never fall back to a default scale or six-note loop.
 - Never perform two solos in succession.
 - Use only instrument `voice`, with sustained sweeping notes and no chords.
 - Never immediately reuse a pitch sequence, contour, or cadence.
+- Never copy music or lyrics from a study reference.
 - Keep the hidden name private.
