@@ -1,0 +1,74 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: barnaby
+  namespace: agents
+  labels:
+    app: barnaby
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: barnaby
+  template:
+    metadata:
+      labels:
+        app: barnaby
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: erebor
+      securityContext:
+        runAsUser: 10003
+        runAsGroup: 10003
+        fsGroup: 10003
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: barnaby
+          image: docker.io/agents/npc-pi:4
+          imagePullPolicy: IfNotPresent
+          args: ["barnaby"]
+          stdin: true
+          tty: true
+          env:
+            - name: NPC_CHARACTER
+              value: barnaby
+            - name: NPC_MEMORY_DIR
+              value: /npc/var
+          envFrom:
+            - secretRef:
+                name: barnaby-credentials
+            - secretRef:
+                name: barnaby-identity
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: var
+              mountPath: /npc/var
+            - name: pi-home
+              mountPath: /home/npc/.pi
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        # Barnaby's authored prompt is the record. Generated sessions and
+        # extension databases disappear with the pod and cannot re-enter it.
+        - name: var
+          emptyDir:
+            sizeLimit: 256Mi
+        - name: pi-home
+          emptyDir:
+            sizeLimit: 256Mi
+        - name: tmp
+          emptyDir:
+            sizeLimit: 256Mi

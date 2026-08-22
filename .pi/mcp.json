@@ -7,7 +7,22 @@
         "User-Agent": "AgentArena-Pi/1.0"
       },
       "requestTimeoutMs": 60000,
-      "lifecycle": "eager"
+      "lifecycle": "eager",
+      "includeTools": [
+        "arena_list_agents",
+        "arena_login",
+        "arena_observe",
+        "arena_survey",
+        "arena_say",
+        "arena_move_to",
+        "arena_talk_to",
+        "arena_choose",
+        "arena_end_talk",
+        "arena_think",
+        "arena_unstick",
+        "arena_play_melody",
+        "arena_stop_melody"
+      ]
     }
   },
   "settings": {
