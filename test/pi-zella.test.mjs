@@ -62,12 +62,15 @@ test('Zella reads live chat and leads an ordinary social life', () => {
   assert.match(persona, /140 characters/);
 });
 
-test('Zella alone carries the verified playable quest guide', () => {
-  const config = read('characters/zella.conf');
+test('Zella and Barnaby carry the verified playable quest guide', () => {
+  const zella = read('characters/zella.conf');
+  const barnaby = read('characters/barnaby.conf');
   const guide = read('personas/zella-world.md');
 
-  assert.match(config, /NPC_VOICE_FILES="\$\{NPC_VOICE_FILES:-personas\/zella-world\.md\}"/);
-  assert.match(config, /verified quest/);
+  assert.match(zella, /NPC_VOICE_FILES="\$\{NPC_VOICE_FILES:-personas\/zella-world\.md\}"/);
+  assert.match(barnaby, /NPC_VOICE_FILES="\$\{NPC_VOICE_FILES:-personas\/zella-world\.md\}"/);
+  assert.match(zella, /verified quest/);
+  assert.match(barnaby, /verified quest/);
   assert.match(guide, /Miller's Stair/);
   assert.match(guide, /Stair Scuttler/);
   assert.match(guide, /Strayed Hauler/);
@@ -78,6 +81,22 @@ test('Zella alone carries the verified playable quest guide', () => {
   assert.match(guide, /Miller's Strongbox/);
   assert.match(guide, /Miller's Weighing Coin/);
   assert.match(guide, /do not send a player there/i);
+});
+
+test('Barnaby is a stateless plain-speech conversation anchor', () => {
+  const config = read('characters/barnaby.conf');
+  const persona = read('personas/barnaby.md');
+
+  assert.match(config, /NPC_MEMORY_ENABLED="\$\{NPC_MEMORY_ENABLED:-0\}"/);
+  assert.match(config, /NPC_SESSION_ENABLED="\$\{NPC_SESSION_ENABLED:-0\}"/);
+  assert.match(config, /NPC_TODO_ENABLED="\$\{NPC_TODO_ENABLED:-0\}"/);
+  assert.match(config, /NPC_REFLEXES_ENABLED="\$\{NPC_REFLEXES_ENABLED:-0\}"/);
+  assert.match(config, /include_recent_messages true/);
+  assert.match(config, /Conversation is useful even when it advances no task/);
+  assert.match(persona, /normal person having a\s+modern conversation/);
+  assert.match(persona, /Do not invent a destination, event, reward, enemy, item/);
+  assert.match(persona, /Use no riddles, omens, prophecies, metaphors, aphorisms/);
+  assert.doesNotMatch(persona, /existential dread/);
 });
 
 test('production moves Zella from Pi to a persistent Codex session', () => {

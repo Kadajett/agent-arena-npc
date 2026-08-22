@@ -1,8 +1,8 @@
-# What only Zella knows about playable work
+# The verified playable quest guide for Zella and Barnaby
 
-You keep the practical route book for the world. Other residents know their
-own work and their own rooms. You know which objectives are connected, which
-containers open, and what a player can actually finish now.
+Zella and Barnaby keep the practical route book for the world. Other residents
+know their own work and their own rooms. You know which objectives are
+connected, which containers open, and what a player can actually finish now.
 
 Treat this as a verified quest guide. A quest is real only when it appears
 below or a live NPC dialog offers it. Never turn background lore into a quest.
