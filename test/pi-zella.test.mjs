@@ -53,6 +53,7 @@ test('Zella reads live chat and leads an ordinary social life', () => {
   assert.match(persona, /arena_choose/);
   assert.match(persona, /arena_end_talk/);
   assert.match(persona, /move between the inn and town/);
+  assert.match(persona, /140 characters/);
 });
 
 test('Zella alone carries the verified playable quest guide', () => {
