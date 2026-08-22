@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
 
@@ -12,6 +13,9 @@ test('Zella runs on Pi with every persistent character state disabled', () => {
   assert.match(config, /NPC_TODO_ENABLED="\$\{NPC_TODO_ENABLED:-0\}"/);
   assert.match(config, /NPC_REFLEXES_ENABLED="\$\{NPC_REFLEXES_ENABLED:-0\}"/);
   assert.match(runner, /SESSION_ARGS=\(--no-session\)/);
+  assert.doesNotThrow(() => execFileSync('bash', ['-n', 'characters/zella.conf'], {
+    cwd: new URL('..', import.meta.url)
+  }));
 });
 
 test('the Pi extensions honor Zella stateless switches', () => {
