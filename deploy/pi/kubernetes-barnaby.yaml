@@ -25,6 +25,23 @@ spec:
         fsGroup: 10003
         seccompProfile:
           type: RuntimeDefault
+      initContainers:
+        - name: seed-pi-trust
+          image: docker.io/agents/npc-pi:4
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "-c"]
+          args:
+            - |
+              set -eu
+              mkdir -p /pi-home/agent
+              printf '%s\n' '{ "defaultProjectTrust": "always" }' > /pi-home/agent/settings.json
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: pi-home
+              mountPath: /pi-home
       containers:
         - name: barnaby
           image: docker.io/agents/npc-pi:4

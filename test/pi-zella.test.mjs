@@ -111,6 +111,8 @@ test('Barnaby production state and provider are fully source controlled', () => 
   assert.match(deployment, /image: docker\.io\/agents\/npc-pi:4/);
   assert.match(deployment, /name: barnaby-identity/);
   assert.match(deployment, /name: var\s+emptyDir:/);
+  assert.match(deployment, /name: seed-pi-trust/);
+  assert.match(deployment, /defaultProjectTrust/);
   assert.doesNotMatch(deployment, /persistentVolumeClaim/);
   assert.match(provider, /registerProvider\("llmmo"/);
   assert.match(provider, /contextWindow: 12800/);
