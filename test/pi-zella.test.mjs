@@ -31,10 +31,16 @@ test('Zella keeps authored speech and dynamic unaccompanied singing', () => {
   assert.match(persona, /I will not sing that name/);
   assert.match(persona, /Prefer your authored facts and lines/);
   assert.match(persona, /instrument `voice`/);
-  assert.match(persona, /two to four bars/);
+  assert.match(persona, /Write four bars once through/);
   assert.match(persona, /delayed vibrato/);
-  assert.match(persona, /alto vowels/);
-  assert.match(persona, /Never fall back to a default scale or six-note loop/);
+  assert.match(persona, /alto vowel/);
+  assert.match(persona, /four-bar vocal sentence/);
+  assert.match(persona, /at least three\s+quarters/);
+  assert.match(persona, /Never default to 100 BPM/);
+  assert.match(persona, /OpenScore Lieder Corpus/);
+  assert.match(persona, /CC0/);
+  assert.match(persona, /Do not quote, transcribe, imitate, or reconstruct/);
+  assert.match(persona, /Never copy music or lyrics from a study reference/);
 });
 
 test('Zella reads live chat and leads an ordinary social life', () => {
