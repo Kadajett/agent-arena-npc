@@ -48,6 +48,15 @@ services:
       NPC_CHARACTER: guy
     command: ["guy"]
 
+  zella:
+    <<: *npc
+    container_name: pi-npc-zella
+    env_file: secrets/zella.env
+    environment:
+      <<: *npc-env
+      NPC_CHARACTER: zella
+    command: ["zella"]
+
 volumes:
   npc_var:
     external: true

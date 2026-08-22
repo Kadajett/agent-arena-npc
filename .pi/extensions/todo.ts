@@ -22,6 +22,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 const SHOW = Number(process.env.NPC_TODO_LIMIT) || 7;
 
 export default function (pi: ExtensionAPI) {
+  if (/^(0|false|off)$/i.test(process.env.NPC_TODO_ENABLED ?? "")) return;
   const dir = process.env.NPC_MEMORY_DIR || "./var";
   const character = process.env.NPC_CHARACTER || "npc";
   fs.mkdirSync(dir, { recursive: true });
