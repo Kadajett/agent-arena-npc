@@ -1,0 +1,50 @@
+model = "gpt-5.6-terra"
+model_reasoning_effort = "medium"
+model_context_window = 32768
+model_auto_compact_token_limit = 24576
+model_auto_compact_token_limit_scope = "total"
+approval_policy = "never"
+sandbox_mode = "danger-full-access"
+web_search = "disabled"
+check_for_update_on_startup = false
+cli_auth_credentials_store = "file"
+
+[history]
+persistence = "save-all"
+
+[memories]
+use_memories = false
+
+[features]
+shell_tool = false
+apps = false
+multi_agent = false
+remote_plugin = false
+goals = false
+memories = false
+
+[agents]
+enabled = false
+
+[apps._default]
+enabled = false
+
+[mcp_servers.arena]
+url = "https://mcp.yougotserved.dev/mcp"
+bearer_token_env_var = "ARENA_API_KEY"
+required = true
+enabled_tools = [
+  "arena_list_agents",
+  "arena_login",
+  "arena_observe",
+  "arena_survey",
+  "arena_say",
+  "arena_move_to",
+  "arena_talk_to",
+  "arena_choose",
+  "arena_end_talk",
+  "arena_think",
+  "arena_unstick",
+  "arena_play_melody",
+  "arena_stop_melody",
+]

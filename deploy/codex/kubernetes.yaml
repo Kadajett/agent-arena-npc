@@ -1,0 +1,188 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: zella-codex-home-erebor
+  namespace: agents
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: zella-codex-config
+  namespace: agents
+data:
+  config.toml: |
+    model = "gpt-5.6-terra"
+    model_reasoning_effort = "medium"
+    model_context_window = 32768
+    model_auto_compact_token_limit = 24576
+    model_auto_compact_token_limit_scope = "total"
+    approval_policy = "never"
+    sandbox_mode = "danger-full-access"
+    web_search = "disabled"
+    check_for_update_on_startup = false
+    cli_auth_credentials_store = "file"
+
+    [history]
+    persistence = "save-all"
+
+    [memories]
+    use_memories = false
+
+    [features]
+    shell_tool = false
+    apps = false
+    multi_agent = false
+    remote_plugin = false
+    goals = false
+    memories = false
+
+    [agents]
+    enabled = false
+
+    [apps._default]
+    enabled = false
+
+    [mcp_servers.arena]
+    url = "https://mcp.yougotserved.dev/mcp"
+    bearer_token_env_var = "ARENA_API_KEY"
+    required = true
+    enabled_tools = ["arena_list_agents", "arena_login", "arena_observe", "arena_survey", "arena_say", "arena_move_to", "arena_talk_to", "arena_choose", "arena_end_talk", "arena_think", "arena_unstick", "arena_play_melody", "arena_stop_melody"]
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: zella-codex-requirements
+  namespace: agents
+data:
+  requirements.toml: |
+    [features]
+    apps = false
+    plugins = false
+    multi_agent = false
+    browser_use = false
+    browser_use_external = false
+    computer_use = false
+
+    [mcp_servers.arena.identity]
+    url = "https://mcp.yougotserved.dev/mcp"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: zella-codex
+  namespace: agents
+  labels:
+    app: zella-codex
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: zella-codex
+  template:
+    metadata:
+      labels:
+        app: zella-codex
+    spec:
+      automountServiceAccountToken: false
+      nodeSelector:
+        kubernetes.io/hostname: erebor
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10003
+        runAsGroup: 10003
+        fsGroup: 10003
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        - name: seed-codex-auth
+          image: zella-codex:0.1.1
+          imagePullPolicy: Never
+          command: ["sh", "-c"]
+          args:
+            - |
+              set -eu
+              mkdir -p /codex-home/sessions
+              if [ ! -s /codex-home/auth.json ]; then
+                cp /auth-bootstrap/auth.json /codex-home/auth.json
+              fi
+              chmod 600 /codex-home/auth.json
+              if [ ! -e /codex-home/.game-only-v1 ]; then
+                find /codex-home/sessions -type f -name '*.jsonl' -delete
+                if [ -d /codex-home/.tmp/plugins ]; then
+                  find /codex-home/.tmp/plugins -mindepth 1 -delete
+                fi
+                touch /codex-home/.game-only-v1
+              fi
+          volumeMounts:
+            - name: codex-home
+              mountPath: /codex-home
+            - name: auth-bootstrap
+              mountPath: /auth-bootstrap
+              readOnly: true
+      containers:
+        - name: zella
+          image: zella-codex:0.1.1
+          imagePullPolicy: Never
+          env:
+            - name: CODEX_HOME
+              value: /home/zella/.codex
+            - name: ARENA_AGENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: zella-game-credentials
+                  key: ARENA_AGENT_ID
+            - name: ARENA_PLAYER_NAME
+              value: Zella Fair
+            - name: ARENA_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: zella-game-credentials
+                  key: ARENA_API_KEY
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: codex-home
+              mountPath: /home/zella/.codex
+            - name: config
+              mountPath: /home/zella/.codex/config.toml
+              subPath: config.toml
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+            - name: requirements
+              mountPath: /etc/codex
+              readOnly: true
+      volumes:
+        - name: codex-home
+          persistentVolumeClaim:
+            claimName: zella-codex-home-erebor
+        - name: auth-bootstrap
+          secret:
+            secretName: zella-codex-auth
+            defaultMode: 0400
+        - name: config
+          configMap:
+            name: zella-codex-config
+        - name: tmp
+          emptyDir:
+            sizeLimit: 256Mi
+        - name: requirements
+          configMap:
+            name: zella-codex-requirements
